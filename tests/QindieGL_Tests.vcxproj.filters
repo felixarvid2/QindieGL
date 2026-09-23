@@ -27,10 +27,51 @@
     <ClCompile Include="homogenous.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="normals.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="normals_original.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="normals_fixed.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="normal_visualiser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="normals_remix.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="tests.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="normals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="data\mesh_barrel.csv">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="data\mesh_arch.csv">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="data\mesh_concrete_pillars.csv">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="data\mesh_corvus_head.csv">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="data\mesh_lobster_crate.csv">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="data\mesh_wall.csv">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="data\mesh_wall2.csv">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

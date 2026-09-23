@@ -10,6 +10,7 @@ static int tests_ok = 0;
 extern void do_texgen_tests();
 extern void do_texgen_flashl();
 extern void do_texgen_homogenous();
+extern void do_normals_test();
 
 int main()
 {
@@ -18,6 +19,7 @@ int main()
     do_texgen_tests();
     do_texgen_flashl();
     do_texgen_homogenous();
+    do_normals_test();
 
     printf("Tests results: %d/%d\n", tests_ok, tests_total);
     system("pause");
