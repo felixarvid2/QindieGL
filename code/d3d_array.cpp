@@ -868,7 +868,7 @@ static void vbo_offset_to_ptr(D3DVAInfo* pVAInfo, const vbodata_t *bs)
 {
 	if ((intptr_t)pVAInfo->data < bs->usedsz)
 	{
-		pVAInfo->data = bs->dataptr + (GLubyte)pVAInfo->data;
+		pVAInfo->data = bs->dataptr + (GLubyte)(intptr_t)pVAInfo->data;
 	}
 }
 

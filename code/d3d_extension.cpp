@@ -44,10 +44,10 @@ typedef struct glext_entry_point_s
 	PROC func;
 } glext_entry_point_t;
 
-#define GL_EXT_ENTRY_POINT( postfix, extname, func, defaultEnable )		{ #func, "GL_" ## postfix ## "_" ## extname, defaultEnable, (PROC)func }, \
-																		{ #func ## postfix, "GL_" ## postfix ## "_" ## extname, defaultEnable, (PROC)func }
-#define WGL_EXT_ENTRY_POINT( postfix, extname, func, defaultEnable )	{ #func, "WGL_" ## postfix ## "_" ## extname, defaultEnable, (PROC)func }, \
-																		{ #func ## postfix, "WGL_" ## postfix ## "_" ## extname, defaultEnable, (PROC)func }
+#define GL_EXT_ENTRY_POINT( postfix, extname, func, defaultEnable )		{ #func, "GL_" postfix "_" extname, defaultEnable, (PROC)func }, \
+																		{ #func postfix, "GL_" postfix "_" extname, defaultEnable, (PROC)func }
+#define WGL_EXT_ENTRY_POINT( postfix, extname, func, defaultEnable )	{ #func, "WGL_" postfix "_" extname, defaultEnable, (PROC)func }, \
+																		{ #func postfix, "WGL_" postfix "_" extname, defaultEnable, (PROC)func }
 
 static glext_entry_point_t glext_EntryPoints[] =
 {
