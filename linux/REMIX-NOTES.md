@@ -17,12 +17,18 @@ After this the message channel handshake completes, Remix finds the camera (`Cam
 the server keeps rendering. `presentSemaphoreEnabled = False` in `.trex/bridge.conf` was used while
 debugging; not re-tested with it enabled.
 
-## Open: window stays white
-With Remix active the game window is solid white (also with `rtx.enableRaytracing = False` and with
-`rtx.showUI = 2`, so even Remix' own UI never appears). Without Remix the same QindieGL build shows the
-Anachronox intro normally. Suspect: the 64-bit bridge server presents into a window owned by the 32-bit
-game process; with Wine/XWayland that surface is never shown. Not yet tried: windowed mode, Proton-GE,
-`PROTON_ENABLE_WAYLAND`, gamescope.
+## Open: window turns white after the first frame
+With Remix active the game window shows one dark raster frame (the Anachronox intro) and then turns solid
+white (255,255,255) for good. Checked with screenshots cropped to the window:
+- same in fullscreen and in windowed mode (`+set u_vid_fullscreen 0 +set vid_fullscreen 0 +set u_gl_mode 3 +set gl_mode 3`),
+- same with stock Remix settings and no mod (not vinevi1's rtx.conf / mod.usda),
+- same with `rtx.enableRaytracing = False`, so it is not ray-traced shading,
+- Remix' own UI (`rtx.showUI = 2`, log says "Remix UI activated") never becomes visible.
+So Remix is rendering (GPU busy, camera found, message channel established) but its swapchain output does
+not reach the screen after the swapchains are recreated at startup (QindieGL creates the device twice;
+log shows IMMEDIATE -> FIFO -> FIFO swapchains). The X11 tree of the window has no child windows.
+Not yet tried: Proton-GE, gamescope, avoiding the device re-creation, `PROTON_ENABLE_WAYLAND=1`.
+Without Remix the same QindieGL build renders normally under Proton's DXVK.
 
 ## Debug tips
 - Use the `debugoptimized` Remix zip + `logLevel = Trace`, `logApiCalls = True`, `logAllCommands = True`
