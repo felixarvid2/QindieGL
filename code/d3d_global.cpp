@@ -29,10 +29,12 @@
 #include "d3d_texture.hpp"
 #include "d3d_matrix_stack.hpp"
 #include "d3d_matrix_detection.hpp"
+#include "d3d_normals.hpp"
 #include "d3d_helpers.hpp"
 #include "hooking.h"
 #include "rmx_gen.h"
 #include "rmx_light.h"
+#include "rmx_maplights.h"
 #include "resource.h"
 
 #include <tchar.h>
@@ -996,6 +998,9 @@ OPENGL_API HGLRC WINAPI wrap_wglCreateContext( HDC hdc )
 	D3DGlobal.settings.game.orthovertexshader = D3DGlobal_ReadGameConf( "orthovertexshader" );
 	D3DGlobal.settings.game.orthoskipuntextureddraws = D3DGlobal_ReadGameConf( "orthoskipuntextureddraws" );
 	D3DGlobal.settings.game.depthOffDisablesWrites = D3DGlobal_ReadGameConf( "depthOffDisablesWrites" );
+	D3DGlobal.settings.game.smoothNormals = D3DGlobal_ReadGameConf( "smoothnormals" );
+	D3DGlobal.settings.game.mapLights = D3DGlobal_ReadGameConf( "maplights" );
+	D3DGlobal.settings.game.mapLightsScale = D3DGlobal_ReadGameConf( "maplights_scale" );
 
 	D3DGlobal.normalPtrGuessEnabled = 0;
 	{
@@ -1487,6 +1492,7 @@ OPENGL_API BOOL WINAPI wrap_wglSwapBuffers( HDC )
 #ifndef QINDIEGLSRC_NO_REMIX
 		qdx_imgui_draw();
 		qdx_lights_draw();
+		qdx_maplights_draw();
 		rmx_frame_end();
 #endif
 
@@ -1509,6 +1515,7 @@ OPENGL_API BOOL WINAPI wrap_wglSwapBuffers( HDC )
 		}
 
 		matrix_detect_frame_ended();
+		D3DNormals_FrameEnded();
 #ifndef QINDIEGLSRC_NO_REMIX
 		hook_frame_ended();
 #endif

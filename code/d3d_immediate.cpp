@@ -23,6 +23,8 @@
 #include "d3d_state.hpp"
 #include "d3d_utils.hpp"
 #include "d3d_immediate.hpp"
+#include "d3d_normals.hpp"
+#include <vector>
 
 //==================================================================================
 // OpenGL Immediate Mode
@@ -160,6 +162,28 @@ void D3DIMBuffer :: End( )
 		memcpy( pVertex, m_pBuffer, sizeof( D3DIMBufferVertex ) );
 	}
 
+	//generate smooth normals for model draws that have none (quads are already triangles here)
+	bool bGenNormals = false;
+	const GLenum genMode = ( m_primitiveType == GL_QUADS ) ? GL_TRIANGLES : m_primitiveType;
+	if ( !m_bXYZW && !D3DState.CurrentState.isSet.bits.norm &&
+		D3DNormals_ShouldGenerate( genMode, m_vertexCount ) )
+	{
+		static std::vector<float> s_positions, s_normals;
+		static std::vector<unsigned int> s_triangles;
+		s_positions.resize( (size_t)m_vertexCount * 3 );
+		for ( int i = 0; i < m_vertexCount; ++i )
+			memcpy( &s_positions[(size_t)i * 3], m_pBuffer[i].position, sizeof(FLOAT)*3 );
+		D3DNormals_BuildTriangleList( genMode, m_vertexCount, s_triangles );
+		if ( !s_triangles.empty() )
+		{
+			D3DNormals_Compute( s_positions.data(), m_vertexCount, s_triangles.data(), (int)s_triangles.size(), s_normals );
+			for ( int i = 0; i < m_vertexCount; ++i )
+				memcpy( m_pBuffer[i].normal, &s_normals[(size_t)i * 3], sizeof(FLOAT)*3 );
+			bGenNormals = true;
+			D3DNormals_RecordDraw( genMode, m_vertexCount );
+		}
+	}
+
 	//build FVF
 	int iFVF = 0;
 	int sizeFVF = 0;
@@ -174,7 +198,7 @@ void D3DIMBuffer :: End( )
 		iFVF |= D3DFVF_XYZ;
 		sizeFVF += 3 * sizeof( float );
 	}
-	if ( D3DState.CurrentState.isSet.bits.norm )
+	if ( D3DState.CurrentState.isSet.bits.norm || bGenNormals )
 	{
 		iFVF |= D3DFVF_NORMAL;
 		sizeFVF += 3 * sizeof( float );

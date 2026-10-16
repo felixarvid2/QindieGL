@@ -421,6 +421,7 @@ copy $(TargetDir)$(ProjectName).ini $(ProjectDir)..\bin\$(Configuration).$(Platf
     <ClCompile Include="..\code\d3d_material.cpp" />
     <ClCompile Include="..\code\d3d_matrix.cpp" />
     <ClCompile Include="..\code\d3d_matrix_detection.cpp" />
+    <ClCompile Include="..\code\d3d_normals.cpp" />
     <ClCompile Include="..\code\d3d_matrix_stack.cpp" />
     <ClCompile Include="..\code\d3d_misc.cpp" />
     <ClCompile Include="..\code\d3d_object.cpp" />
@@ -432,6 +433,7 @@ copy $(TargetDir)$(ProjectName).ini $(ProjectDir)..\bin\$(Configuration).$(Platf
     <ClCompile Include="..\code\d3d_wrapper.cpp" />
     <ClCompile Include="..\code\rmx_gen.cpp" />
     <ClCompile Include="..\code\rmx_light.cpp" />
+    <ClCompile Include="..\code\rmx_maplights.cpp" />
     <ClCompile Include="..\code\win_imgui.cpp" />
     <ClCompile Include="..\extern\dxut\dxerr_a.cpp" />
     <ClCompile Include="..\extern\dxut\dxerr_w.cpp" />
@@ -451,6 +453,7 @@ copy $(TargetDir)$(ProjectName).ini $(ProjectDir)..\bin\$(Configuration).$(Platf
     <ClInclude Include="..\code\d3d_helpers.hpp" />
     <ClInclude Include="..\code\d3d_immediate.hpp" />
     <ClInclude Include="..\code\d3d_matrix_detection.hpp" />
+    <ClInclude Include="..\code\d3d_normals.hpp" />
     <ClInclude Include="..\code\d3d_matrix_stack.hpp" />
     <ClInclude Include="..\code\d3d_object.hpp" />
     <ClInclude Include="..\code\d3d_pixels.hpp" />
@@ -462,6 +465,7 @@ copy $(TargetDir)$(ProjectName).ini $(ProjectDir)..\bin\$(Configuration).$(Platf
     <ClInclude Include="..\code\resource.h" />
     <ClInclude Include="..\code\rmx_gen.h" />
     <ClInclude Include="..\code\rmx_light.h" />
+    <ClInclude Include="..\code\rmx_maplights.h" />
     <ClInclude Include="..\extern\dxut\dxerr.h" />
     <ClInclude Include="..\extern\imgui\backends\imgui_impl_dx9.h" />
     <ClInclude Include="..\extern\imgui\backends\imgui_impl_win32.h" />

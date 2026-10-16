@@ -93,6 +93,11 @@ bool matrix_detect_is_detection_enabled()
 	return g_md.det_enabled;
 }
 
+bool matrix_detect_is_active()
+{
+	return g_md.det_enabled && g_md.det_mode != DETECTION_NONE;
+}
+
 inline bool matrix_is_identity(const float* mat)
 {
 	return matrix_detect_are_equal(g_mat_identity, mat, 0);

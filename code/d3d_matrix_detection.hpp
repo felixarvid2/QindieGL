@@ -26,6 +26,7 @@ typedef struct matrix_display_s
 } matrix_detect_t;
 
 bool matrix_detect_is_detection_enabled();
+bool matrix_detect_is_active();
 void matrix_detect_frame_ended();
 void matrix_detect_configuration_reset();
 void matrix_detect_process_upload(const float* mat, D3DXMATRIX *detected_model, D3DXMATRIX *detected_view);
