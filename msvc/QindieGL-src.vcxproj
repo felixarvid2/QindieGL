@@ -429,6 +429,7 @@ copy $(TargetDir)$(ProjectName).ini $(ProjectDir)..\bin\$(Configuration).$(Platf
     <ClCompile Include="..\code\d3d_state.cpp" />
     <ClCompile Include="..\code\d3d_stencil.cpp" />
     <ClCompile Include="..\code\d3d_texgen.cpp" />
+    <ClCompile Include="..\code\d3d_texdump.cpp" />
     <ClCompile Include="..\code\d3d_texture.cpp" />
     <ClCompile Include="..\code\d3d_wrapper.cpp" />
     <ClCompile Include="..\code\rmx_gen.cpp" />

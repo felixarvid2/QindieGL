@@ -103,4 +103,8 @@ private:
 	DWORD					m_priority;
 };
 
+// debug: hash/dump mip 0 of a 2D texture (RTX Remix hash), see d3d_texdump.cpp
+void D3DTexDump_Init();
+void D3DTexDump_Level0( D3DTextureObject *tex );
+
 #endif //QINDIEGL_D3D_TEXTURE_H
