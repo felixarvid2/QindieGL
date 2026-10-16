@@ -204,7 +204,22 @@ static void hook_qsortFast(void* base, unsigned int num, unsigned width)
 	}
 }
 
-#if id386
+#if id386 && !defined(_MSC_VER)
+__attribute__((naked)) static void hook_qsortFast_uc0()
+{
+	/* usercall (eax, ecx, ebx) -> cdecl hook_qsortFast(ecx, eax, ebx) */
+	__asm__ __volatile__(
+		"push %%ebp\n\t"
+		"push %%ebx\n\t"
+		"push %%eax\n\t"
+		"push %%ecx\n\t"
+		"call %P0\n\t"
+		"add $12, %%esp\n\t"
+		"pop %%ebp\n\t"
+		"ret\n\t"
+		: : "i"(hook_qsortFast) );
+}
+#elif id386
 static __declspec(naked) void hook_qsortFast_uc0()
 {
 	//EAX = 00000456 EBX = 00000008 ECX = 1F23C900
@@ -269,6 +284,7 @@ static void hook_addworldsurf( void* pdata, int val )
 
 	if ( *(int*)pdata != *tr_dp_viewcount )
 	{
+#if defined(_MSC_VER)
 		__asm {
 			mov eax, pdata
 			push eax
@@ -276,6 +292,18 @@ static void hook_addworldsurf( void* pdata, int val )
 			call fp_addworldsurf2
 			add esp, 4
 		}
+#else
+		{
+			int eax_io = val, ecx_d, edx_d;
+			__asm__ __volatile__(
+				"push %[pd]\n\t"
+				"call *%[fp]\n\t"
+				"add $4, %%esp\n\t"
+				: "+a"(eax_io), "=&c"(ecx_d), "=&d"(edx_d)
+				: [pd] "r"(pdata), [fp] "r"(fp_addworldsurf2)
+				: "memory", "cc" );
+		}
+#endif
 		//((void (*)(void*))fp_addworldsurf2)(ptr);
 	}
 }
@@ -449,6 +477,7 @@ static void hook_surfacemodelcached(byte *param_1)
 	if (0x20000 < surfcount + *dp_modelcachecount) {
 		((void(*)())fp_RB_EndSurface)();
 		*dp_01548adc = *dp_017efc1c;
+#if defined(_MSC_VER)
 		_asm {
 			MOV        EDX, dword ptr ds:0x017efc00
 			MOV        ECX, dword ptr ds:0x017efc10
@@ -456,6 +485,20 @@ static void hook_surfacemodelcached(byte *param_1)
 			call fp_RB_BeginSurface
 			add esp, 4
 		}
+#else
+		{
+			int eax_d, ecx_d, edx_d;
+			__asm__ __volatile__(
+				"movl 0x017efc00, %%edx\n\t"
+				"movl 0x017efc10, %%ecx\n\t"
+				"push %%edx\n\t"
+				"call *%[fp]\n\t"
+				"add $4, %%esp\n\t"
+				: "=&a"(eax_d), "=&c"(ecx_d), "=&d"(edx_d)
+				: [fp] "r"(fp_RB_BeginSurface)
+				: "memory", "cc" );
+		}
+#endif
 	}
 	((void(*)(void*))fp_surfacemodelcached)(param_1);
 }
@@ -832,62 +875,62 @@ static void do_detour_action( DetourAction_FP detourAction )
 	{
 		if (fp_qsortFast)
 		{
-			error = detourAction(&(PVOID&)fp_qsortFast, hook_qsortFast);
+			error = detourAction((PVOID*)&fp_qsortFast, (PVOID)hook_qsortFast);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		if (fp_qsortFast_uc0)
 		{
-			error = detourAction(&(PVOID&)fp_qsortFast_uc0, hook_qsortFast_uc0);
+			error = detourAction((PVOID*)&fp_qsortFast_uc0, (PVOID)hook_qsortFast_uc0);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		if (fp_markLeaves)
 		{
-			error = detourAction(&(PVOID&)fp_markLeaves, hook_markLeaves);
+			error = detourAction((PVOID*)&fp_markLeaves, (PVOID)hook_markLeaves);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		if ( fp_addworldsurfaces )
 		{
-			error = detourAction(&(PVOID&)fp_addworldsurfaces, hook_addworldsurfaces);
+			error = detourAction((PVOID*)&fp_addworldsurfaces, (PVOID)hook_addworldsurfaces);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		if ( fp_addworldsurf1 )
 		{
-			error = detourAction(&(PVOID&)fp_addworldsurf1, hook_addworldsurf);
+			error = detourAction((PVOID*)&fp_addworldsurf1, (PVOID)hook_addworldsurf);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		if ( fp_setupfrustum )
 		{
-			error = detourAction(&(PVOID&)fp_setupfrustum, hook_setupfrustum);
+			error = detourAction((PVOID*)&fp_setupfrustum, (PVOID)hook_setupfrustum);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		if (fp_surfacemodelcached)
 		{
-			error = detourAction(&(PVOID&)fp_surfacemodelcached, hook_surfacemodelcached);
+			error = detourAction((PVOID*)&fp_surfacemodelcached, (PVOID)hook_surfacemodelcached);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		if (fp_mouseMove)
 		{
-			error = detourAction(&(PVOID&)fp_mouseMove, hook_IN_MouseMove);
+			error = detourAction((PVOID*)&fp_mouseMove, (PVOID)hook_IN_MouseMove);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		if ( fp_retvoid )
 		{
-			error = detourAction(&(PVOID&)fp_retvoid, hook_retvoid);
+			error = detourAction((PVOID*)&fp_retvoid, (PVOID)hook_retvoid);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		if ( fp_retzero )
 		{
-			error = detourAction(&(PVOID&)fp_retzero, hook_retzero);
+			error = detourAction((PVOID*)&fp_retzero, (PVOID)hook_retzero);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		if ( fp_retone )
 		{
-			error = detourAction(&(PVOID&)fp_retone, hook_retone);
+			error = detourAction((PVOID*)&fp_retone, (PVOID)hook_retone);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		if ( fp_retnegone )
 		{
-			error = detourAction(&(PVOID&)fp_retnegone, hook_retnegone);
+			error = detourAction((PVOID*)&fp_retnegone, (PVOID)hook_retnegone);
 			BREAK_ON_DETOUR_ERROR(error, errhint);
 		}
 		error = DetourTransactionCommit();

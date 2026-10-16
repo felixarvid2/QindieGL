@@ -23,12 +23,18 @@ const void* hook_find_pattern( unsigned char* pat, int patsz );
 void* hook_loadptr( const void* addr );
 void* hook_offset_to_addr( void* offset );
 
+#if defined(_MSC_VER)
+#define HOOK_FUNCSIG __FUNCSIG__
+#else
+#define HOOK_FUNCSIG __PRETTY_FUNCTION__
+#endif
+
 #define HOOK_ONLINE_NOTICE() { \
   static BOOL printed_online = FALSE; \
   if( !printed_online ) \
   { \
 	printed_online = TRUE; \
-    logPrintf("ONLINE: %s\n", __FUNCSIG__); \
+    logPrintf("ONLINE: %s\n", HOOK_FUNCSIG); \
   } \
 }
 

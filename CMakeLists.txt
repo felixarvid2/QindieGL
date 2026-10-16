@@ -4,9 +4,9 @@ project(QindieGL C CXX RC)
 # Linux/MinGW build of the Windows opengl32.dll wrapper (runs under Wine/Proton).
 file(GLOB QGL_SRC code/*.cpp)
 file(GLOB IMGUI_SRC extern/imgui/*.cpp)
-# idtech3_mixup (per-game hooks) still uses MSVC inline asm / __FUNCSIG__; not ported yet, so default to the
-# existing QINDIEGLSRC_NO_REMIX configuration which compiles those hooks out.
-option(QINDIEGL_NO_REMIX "Build without the idtech3_mixup hooks / RTX Remix API" ON)
+# idtech3_mixup (per-game hooks, RTX Remix API) is ported to clang (GNU asm paths next to the MSVC ones).
+# Heretic2 patching (h2_refgl.cpp) is compiled out on non-MSVC. Set ON for the old hook-less build.
+option(QINDIEGL_NO_REMIX "Build without the idtech3_mixup hooks / RTX Remix API" OFF)
 file(GLOB MIXUP_SRC idtech3_mixup/*.cpp)
 set(DETOURS_SRC
     extern/detours/src/detours.cpp extern/detours/src/modules.cpp extern/detours/src/disasm.cpp
