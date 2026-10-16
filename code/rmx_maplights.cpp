@@ -1,3 +1,4 @@
+#include <math.h>
 #include "rmx_maplights.h"
 #ifndef QINDIEGLSRC_NO_REMIX
 #include "rmx_gen.h"
@@ -74,8 +75,10 @@ static void maplights_load()
 		while ( *p == ' ' || *p == '\t' ) p++;
 		if ( *p == '#' || *p == '\r' || *p == '\n' || *p == 0 ) continue;
 
-		float v[8];
-		if ( sscanf( p, "%f %f %f %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7] ) != 8 )
+		// x y z r g b intensity radius [dx dy dz cone_degrees] (optional spotlight shaping)
+		float v[12];
+		int nv = sscanf( p, "%f %f %f %f %f %f %f %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9], &v[10], &v[11] );
+		if ( nv != 8 && nv != 12 )
 		{
 			if ( bad++ < 5 ) logPrintf( "MapLights: %s:%d: parse error\n", g_mapname, lineno );
 			continue;
@@ -94,6 +97,20 @@ static void maplights_load()
 		sphere.position.z = v[2];
 		sphere.radius = v[7];
 		sphere.shaping_hasvalue = 0;
+		if ( nv == 12 && v[11] > 0.0f )
+		{
+			float dl = sqrtf( v[8] * v[8] + v[9] * v[9] + v[10] * v[10] );
+			if ( dl > 1e-6f )
+			{
+				sphere.shaping_hasvalue = 1;
+				sphere.shaping_value.direction.x = v[8] / dl;
+				sphere.shaping_value.direction.y = v[9] / dl;
+				sphere.shaping_value.direction.z = v[10] / dl;
+				sphere.shaping_value.coneAngleDegrees = v[11];
+				sphere.shaping_value.coneSoftness = 0.1f;
+				sphere.shaping_value.focusExponent = 0.0f;
+			}
+		}
 		sphere.volumetricRadianceScale = 0.0f;
 
 		uint32_t idx = (uint32_t)g_handles.size();
