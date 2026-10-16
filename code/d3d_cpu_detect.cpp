@@ -31,6 +31,7 @@
 //==================================================================================
 
 #if id386
+#if defined(_MSC_VER)
 static bool cpuid( unsigned long function, unsigned long& out_eax, unsigned long& out_ebx, unsigned long& out_ecx, unsigned long& out_edx )
 {
 	bool retval = true;
@@ -58,6 +59,17 @@ static bool cpuid( unsigned long function, unsigned long& out_eax, unsigned long
 	_asm popad
 	return retval;
 }
+#else
+#include <cpuid.h>
+static bool cpuid( unsigned long function, unsigned long& out_eax, unsigned long& out_ebx, unsigned long& out_ecx, unsigned long& out_edx )
+{
+	unsigned int a = 0, b = 0, c = 0, d = 0;
+	if ( !__get_cpuid( (unsigned int)function, &a, &b, &c, &d ) )
+		return false;
+	out_eax = a; out_ebx = b; out_ecx = c; out_edx = d;
+	return true;
+}
+#endif
 #endif
 
 void D3DGlobal_CPU_Detect()

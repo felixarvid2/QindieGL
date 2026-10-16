@@ -160,7 +160,7 @@ static void TexGenFunc_SphereMap_SSE( int /*stage*/, int coord, const GLfloat* v
 		x0 = _mm_shuffle_ps(x0, x0, 0b11000000);
 		x1 = _mm_mul_ps(x1, x0);
 		x1 = _mm_add_ps(x1, sse_bias_one_half);
-		*output_texcoord = x1.m128_f32[coord];
+		*output_texcoord = ((float*)&x1)[coord];
 	}
 }
 
@@ -197,7 +197,7 @@ static void TexGenFunc_ReflectionMap_SSE( int /*stage*/, int coord, const GLfloa
 		//xmm1[0,1,2] = vertex[0,1,2] - normal[0,1,2] * fdot;
 		x2 = _mm_mul_ps(sse_normal, x0);
 		x1 = _mm_sub_ps(sse_vertex, x2);
-		*output_texcoord = x1.m128_f32[coord];
+		*output_texcoord = ((float*)&x1)[coord];
 	}
 }
 
