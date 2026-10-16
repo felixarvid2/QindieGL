@@ -157,6 +157,7 @@ typedef struct D3DGlobal_s
 	struct {
 		DWORD				multisample;
 		DWORD				projectionFix;
+		DWORD				dumpTextures;
 		DWORD				projectionMaxZFar;
 		DWORD				borderlessFullscreen;
 		DWORD				texcoordFix;

@@ -864,7 +864,7 @@ static void D3DTex_LoadImage(GLenum target, GLint level, GLint internalformat, G
 			D3DGlobal.lastError = hr;
 			return;
 		}
-		if (pixels) pTexture->CheckMipmapAutogen();
+		if (pixels) { pTexture->CheckMipmapAutogen(); D3DTexDump_Level0( pTexture ); }
 	}
 	else if ( level == 1 )
 	{
@@ -916,6 +916,7 @@ static void D3DTex_LoadSubImage(GLenum target, GLint level, GLint xoffset, GLint
 		}
 		if (level == 0) {
 			D3DState.TextureState.currentTexture[currentTMU][targetIndex]->CheckMipmapAutogen();
+			D3DTexDump_Level0( D3DState.TextureState.currentTexture[currentTMU][targetIndex] );
 		}
 	}
 }
@@ -979,7 +980,7 @@ static void D3DTex_LoadCompressedImage(GLenum target, GLint level, GLint interna
 			D3DGlobal.lastError = hr;
 			return;
 		}
-		if (pixels) pTexture->CheckMipmapAutogen();
+		if (pixels) { pTexture->CheckMipmapAutogen(); D3DTexDump_Level0( pTexture ); }
 	}
 	else if ( level == 1 )
 	{
