@@ -10,6 +10,4 @@ You search and read this repository and report back. You never change files.
 - Search wide first (Glob, Grep), then read only the parts that answer the question.
 - Report what you found as `path:line` with a one-line note each, plus the short excerpts that
   matter. Say plainly when something does not exist or you could not find it.
-- The repository holds several projects: `ashfall/` (TypeScript, Three.js ARPG — the main one),
-  `rune/`, `natverksspel/`, `cisco-analyzer/`, and an asset library in `assets/`. Stay inside the
-  project the question is about.
+- Stay inside the part of the repository the question is about; `extern/` is third-party code.

@@ -8,12 +8,11 @@ You implement changes in this repository and prove they work.
 
 - Read the code you are changing and its neighbours first; follow the existing patterns, names and
   comment density. Keep the change to what was asked.
-- `ashfall/` (TypeScript, Vite, Three.js, a small ECS): game data in `src/data/`, systems in
-  `src/systems/`, rendering in `src/render/`, UI in `src/ui/`; design notes in `docs/`.
-  The game's text is English only.
-- Before handing back, from `ashfall/`: `npx tsc --noEmit -p .` and `npx vitest run` must pass.
-  Add or update tests for behaviour you change (`ashfall/tests/`). For visual changes, say what
-  should be checked in the browser.
-- Never commit secrets: keys live only in `ashfall/.env` (gitignored).
+- QindieGL: C++ wrapper in `code/` and `idtech3_mixup/`, third-party code in `extern/` (do not edit).
+  Windows-only code must keep building with MSVC; the Linux/MinGW build is in `linux/` + `CMakeLists.txt`.
+- Before handing back, the Linux build must pass:
+  `cmake --build build-linux -j8` (configure with `-DCMAKE_TOOLCHAIN_FILE=linux/toolchain-i686-llvm-mingw.cmake`).
+  For rendering changes, say what should be checked in the game.
+- Never commit secrets or built binaries.
 - Do not commit or push unless asked. Report what you changed, the check results, and anything
   you were unsure about.

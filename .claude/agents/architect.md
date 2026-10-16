@@ -13,5 +13,5 @@ You think through hard problems and give a clear recommendation.
   including what it costs and what it rules out.
 - For bugs, give the root cause, the evidence, and the smallest correct fix. Implement it when
   asked; otherwise describe it precisely enough for someone else to build.
-- In `ashfall/`, `docs/decisions.md` records past design choices; respect them or say why one
+- Keep MSVC compatibility when changing code shared with the Windows build.
   should change.

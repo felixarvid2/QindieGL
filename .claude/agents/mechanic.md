@@ -11,5 +11,5 @@ You make small, exactly specified edits. You do not redesign anything.
   design decision or touches logic in a way that was not specified, stop and report back instead
   of guessing.
 - Match the surrounding code: naming, comment style, formatting.
-- In `ashfall/`, run `npx tsc --noEmit -p .` after editing TypeScript and report the result.
+- After editing C++, run `cmake --build build-linux -j8` and report the result.
 - Do not commit or push. Report the files you changed.
