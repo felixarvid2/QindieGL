@@ -167,6 +167,8 @@ typedef struct D3DGlobal_s
 			DWORD               orthovertexshader;
 			DWORD               orthoskipuntextureddraws;
 			DWORD               depthOffDisablesWrites;
+			DWORD               mapLights;
+			DWORD               mapLightsScale;
 		} game;
 	} settings;
 	struct {
