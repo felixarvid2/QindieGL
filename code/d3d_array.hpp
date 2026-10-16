@@ -21,6 +21,8 @@
 #ifndef	QINDIEGL_D3D_ARRAY_H
 #define QINDIEGL_D3D_ARRAY_H
 
+#include <vector>
+
 class D3DVABuffer
 {
 	static const GLsizei c_MaxSwapFrame = 8;
@@ -37,6 +39,8 @@ public:
 	GLsizei GetLockCount() const { return m_lockCount; }
 
 protected:
+	const float* GeneratedNormal( GLint elemIndex ) const;
+	template<typename T> void GenerateNormals( GLenum mode, GLuint start, GLsizei count, const T *indices );
 	void SetMinimumVertexBufferSize( GLsizei numVerts );
 	int  SetMinimumIndexBufferSize( GLsizei numIndices );
 	void SetupTexCoords( const float *texcoords, int num_coords, const float *position, const float *normal, int stage, float *out_texcoords );
@@ -69,6 +73,14 @@ private:
 	GLenum						m_primitiveType;
 	GLsizei						m_primitiveIndexCount;
 	GLint						m_swapFrame;
+	// generated smooth normals (per-game option smoothnormals), indexed through m_genRemap
+	bool						m_genActive;
+	GLuint						m_genLo;
+	std::vector<int>			m_genRemap;
+	std::vector<float>			m_genNormals;
+	std::vector<float>			m_genPositions;
+	std::vector<unsigned int>	m_genSeq;
+	std::vector<unsigned int>	m_genTriangles;
 };
 
 #endif //QINDIEGL_D3D_ARRAY_H

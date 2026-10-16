@@ -421,6 +421,7 @@ copy $(TargetDir)$(ProjectName).ini $(ProjectDir)..\bin\$(Configuration).$(Platf
     <ClCompile Include="..\code\d3d_material.cpp" />
     <ClCompile Include="..\code\d3d_matrix.cpp" />
     <ClCompile Include="..\code\d3d_matrix_detection.cpp" />
+    <ClCompile Include="..\code\d3d_normals.cpp" />
     <ClCompile Include="..\code\d3d_matrix_stack.cpp" />
     <ClCompile Include="..\code\d3d_misc.cpp" />
     <ClCompile Include="..\code\d3d_object.cpp" />
@@ -451,6 +452,7 @@ copy $(TargetDir)$(ProjectName).ini $(ProjectDir)..\bin\$(Configuration).$(Platf
     <ClInclude Include="..\code\d3d_helpers.hpp" />
     <ClInclude Include="..\code\d3d_immediate.hpp" />
     <ClInclude Include="..\code\d3d_matrix_detection.hpp" />
+    <ClInclude Include="..\code\d3d_normals.hpp" />
     <ClInclude Include="..\code\d3d_matrix_stack.hpp" />
     <ClInclude Include="..\code\d3d_object.hpp" />
     <ClInclude Include="..\code\d3d_pixels.hpp" />
