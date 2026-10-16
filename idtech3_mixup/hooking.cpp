@@ -11,7 +11,7 @@
 
 static BOOL h2_initialised = FALSE;
 
-void* fp_exit = exit; //ExitProcess;
+void* fp_exit = (void*)exit; //ExitProcess;
 
 DECLSPEC_NORETURN VOID WINAPI hk_ExitProcess( UINT code )
 {
@@ -159,16 +159,16 @@ void hook_do_init(const char *exename, const char* dllname, const char *gamename
 			fp_exit = DetourFindFunction( exename, "exit" );
 			if ( fp_exit )
 			{
-				error = DetourAttach( &(PVOID&)fp_exit, hk_exit );
+				error = DetourAttach( &(PVOID&)fp_exit, (PVOID)hk_exit );
 				if ( error != NO_ERROR ) logPrintf( "Hookinit: failed to intercept %s: %d \n", "exit", error );
 				break;
 			}
 			fp_exit = DetourFindFunction( exename, "ExitProcess" );
 			if ( !fp_exit )
 			{
-				fp_exit = ExitProcess;
+				fp_exit = (void*)ExitProcess;
 			}
-			error = DetourAttach( &(PVOID&)fp_exit, hk_ExitProcess );
+			error = DetourAttach( &(PVOID&)fp_exit, (PVOID)hk_ExitProcess );
 			if ( error != NO_ERROR ) logPrintf( "Hookinit: failed to intercept %s: %d \n", "ExitProcess", error );
 		} while ( 0 );
 
@@ -228,6 +228,47 @@ void hook_frame_ended()
 uint32_t check_fp_stack(int mode, fstack_save_data_t* dest) { return 0; }
 void restore_fp_stack(void* dest) {};
 #else
+#if !defined(_MSC_VER)
+uint32_t check_fp_stack(int mode, fstack_save_data_t* dest)
+{
+	uint16_t sw;
+	uint32_t flags;
+
+	__asm__ volatile ( "fwait\n\tfnstsw %0" : "=a"(sw) : : "cc" );
+	flags = ( (uint32_t)sw >> 11 ) & 7;
+	if ( !flags )
+		return flags;
+
+	switch (mode)
+	{
+	case FPSTK_CLEAR: //clear stack
+	{
+		uint32_t n = flags;
+		__asm__ volatile (
+			"1:\n\t"
+			"fstp %%st(0)\n\t"
+			"decl %0\n\t"
+			"jnz 1b"
+			: "+r"(n) : : "cc", "st", "st(1)", "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)" );
+		break;
+	}
+	case FPSTK_SAVE: //store stack
+		if (dest != NULL)
+		{
+			void* fsave_dest = dest->data;
+			__asm__ volatile ( "fwait\n\tfsave (%0)" : : "r"(fsave_dest) : "memory" );
+		}
+		break;
+	}
+
+	return flags;
+}
+
+void restore_fp_stack(void* dest)
+{
+	__asm__ volatile ( "fwait\n\tfinit\n\tfrstor (%0)" : : "r"(dest) : "memory" );
+}
+#else
 uint32_t check_fp_stack(int mode, fstack_save_data_t* dest)
 {
 	uint32_t flags;
@@ -277,4 +318,5 @@ void restore_fp_stack(void* dest)
 		frstor dest
 	}
 }
+#endif
 #endif

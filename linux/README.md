@@ -16,5 +16,7 @@ Notes
 - Shaders are built from source (`SHADERS_FROM_SOURCE=1`), compiled at runtime by d3dx.
 - `linux/gen-def.py` generates the export .def: the code is C++-mangled stdcall, `msvc/opengl32.def`
   lists plain GL names. The export table matches the official 1.2.2 build (385 names).
-- `QINDIEGL_NO_REMIX=ON` (default) compiles out `idtech3_mixup` (per-game hooks, RTX Remix API).
-  That code still uses MSVC inline asm, `__declspec(naked)` and `__FUNCSIG__` and needs porting.
+- `idtech3_mixup` (per-game hooks) is ported: MSVC inline asm / naked functions are kept under `_MSC_VER`,
+  GNU asm paths are used otherwise. Only compile- and smoke-tested with Anachronox (hooks initialise as in the
+  official build). `QINDIEGL_NO_REMIX=ON` builds without the hooks.
+- `h2_refgl.cpp` (Heretic2 ref_gl patching by byte-copying naked functions) is compiled out on non-MSVC.

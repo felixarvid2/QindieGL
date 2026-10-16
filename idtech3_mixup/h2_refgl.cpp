@@ -21,8 +21,8 @@
 #include "fnvhash/fnv.h"
 #include <intrin.h>
 
-#if !id386
-//for non 32-bit define empty functions
+#if !id386 || !defined(_MSC_VER)
+//for non 32-bit (and non-MSVC: naked asm + byte-copy patching, not ported) define empty functions
 void h2_refgl_init() {}
 void h2_refgl_deinit() {}
 void h2_refgl_frame_ended() {}
