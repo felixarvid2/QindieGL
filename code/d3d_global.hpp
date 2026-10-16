@@ -166,6 +166,7 @@ typedef struct D3DGlobal_s
 			DWORD               remixapi;
 			DWORD               orthovertexshader;
 			DWORD               orthoskipuntextureddraws;
+			DWORD               flashblendLights;
 			DWORD               depthOffDisablesWrites;
 		} game;
 	} settings;
