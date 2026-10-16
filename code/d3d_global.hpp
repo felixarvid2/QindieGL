@@ -168,6 +168,8 @@ typedef struct D3DGlobal_s
 			DWORD               orthoskipuntextureddraws;
 			DWORD               depthOffDisablesWrites;
 			DWORD               smoothNormals;
+			DWORD               mapLights;
+			DWORD               mapLightsScale;
 		} game;
 	} settings;
 	struct {

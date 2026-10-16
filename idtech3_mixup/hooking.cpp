@@ -8,6 +8,7 @@
 #include "d3d_global.hpp"
 #include "surface_sorting.h"
 #include "h2_refgl.h"
+#include "rmx_maplights.h"
 
 static BOOL h2_initialised = FALSE;
 
@@ -39,6 +40,13 @@ static LONG WINAPI hk_CDSA( DEVMODEA*, DWORD ) { bf_log_once(); return DISP_CHAN
 static LONG WINAPI hk_CDSW( DEVMODEW*, DWORD ) { bf_log_once(); return DISP_CHANGE_SUCCESSFUL; }
 static LONG WINAPI hk_CDSExA( LPCSTR, DEVMODEA*, HWND, DWORD, LPVOID ) { bf_log_once(); return DISP_CHANGE_SUCCESSFUL; }
 static LONG WINAPI hk_CDSExW( LPCWSTR, DEVMODEW*, HWND, DWORD, LPVOID ) { bf_log_once(); return DISP_CHANGE_SUCCESSFUL; }
+
+static void (__cdecl *fp_ref_SetMapName)( const char* ) = NULL;
+static void __cdecl hk_ref_SetMapName( const char *name )
+{
+	qdx_maplights_set_map( name );
+	fp_ref_SetMapName( name );
+}
 
 int hook_dll_on_load_check()
 {
@@ -220,6 +228,25 @@ void hook_do_init(const char *exename, const char* dllname, const char *gamename
 		//pin our handle so that we do not get unloaded on FreeLibrary
 		HMODULE hm = 0;
 		GetModuleHandleEx( GET_MODULE_HANDLE_EX_FLAG_PIN, dllname, &hm );
+	}
+
+	if ( D3DGlobal_ReadGameConf( "maplights" ) )
+	{
+		HMODULE hrefgl = GetModuleHandleA( "ref_gl.dll" );
+		fp_ref_SetMapName = hrefgl ? (void (__cdecl*)( const char* ))GetProcAddress( hrefgl, "ref_SetMapName" ) : NULL;
+		if ( !fp_ref_SetMapName )
+		{
+			logPrintf( "MapLights: ref_gl.dll!ref_SetMapName not found, disabled\n" );
+		}
+		else
+		{
+			DetourTransactionBegin();
+			DetourUpdateThread( GetCurrentThread() );
+			error = DetourAttach( &(PVOID&)fp_ref_SetMapName, (PVOID)hk_ref_SetMapName );
+			if ( error != NO_ERROR ) logPrintf( "Hookinit: failed to intercept %s: %d \n", "ref_SetMapName", error );
+			error = DetourTransactionCommit();
+			if ( error != NO_ERROR ) logPrintf( "Hookinit: DetourTransactionCommit failed: %d \n", error );
+		}
 	}
 
     hook_surface_sorting_do_init();
