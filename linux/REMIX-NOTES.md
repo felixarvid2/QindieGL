@@ -17,18 +17,23 @@ After this the message channel handshake completes, Remix finds the camera (`Cam
 the server keeps rendering. `presentSemaphoreEnabled = False` in `.trex/bridge.conf` was used while
 debugging; not re-tested with it enabled.
 
-## Open: window turns white after the first frame
-With Remix active the game window shows one dark raster frame (the Anachronox intro) and then turns solid
-white (255,255,255) for good. Checked with screenshots cropped to the window:
-- same in fullscreen and in windowed mode (`+set u_vid_fullscreen 0 +set vid_fullscreen 0 +set u_gl_mode 3 +set gl_mode 3`),
-- same with stock Remix settings and no mod (not vinevi1's rtx.conf / mod.usda),
-- same with `rtx.enableRaytracing = False`, so it is not ray-traced shading,
-- Remix' own UI (`rtx.showUI = 2`, log says "Remix UI activated") never becomes visible.
-So Remix is rendering (GPU busy, camera found, message channel established) but its swapchain output does
-not reach the screen after the swapchains are recreated at startup (QindieGL creates the device twice;
-log shows IMMEDIATE -> FIFO -> FIFO swapchains). The X11 tree of the window has no child windows.
-Not yet tried: Proton-GE, gamescope, avoiding the device re-creation, `PROTON_ENABLE_WAYLAND=1`.
-Without Remix the same QindieGL build renders normally under Proton's DXVK.
+## Fixed: window turns white after the first frame
+Cause: Remix' new GUI input method (`rtx.useNewGuiInputMethod`, default True) creates "RTX Remix Overlay",
+a WS_EX_LAYERED window with alpha 0 placed over the game's client area. On Windows DWM makes it invisible;
+under Wine/X11 it only gets `_NET_WM_WINDOW_OPACITY = 0`, which COSMIC and a plain X server ignore, so it
+is drawn as an opaque white window on top of the game (found with python-xlib in a nested Xwayland: an extra
+640x480 toplevel owned by NvRemixBridge.exe at the game window's position). Fix in `rtx.conf`:
+
+    rtx.useNewGuiInputMethod = False
+
+How presenting works here: the 64-bit bridge server renders into an offscreen X window and Wine blits it
+into the 32-bit game's window after each present ("other process window rendering");
+`WINE_DISABLE_VULKAN_OPWR=1` makes surface creation fail ("Couldn't load renderer!"), so leave it unset.
+
+Working setup (GE-Proton 11-9): rtx.conf with `rtx.dlfg.enable = False`, `rtx.dlfg.enablePresentMetering = False`,
+`rtx.useNewGuiInputMethod = False`; `.trex/bridge.conf` with `presentSemaphoreEnabled = False`.
+Do not use `PROTON_ENABLE_WAYLAND=1` with this setup: it crashed the desktop session.
+Safer testing: run a nested `Xwayland :7 -geometry 1024x768 -decorate` and put `DISPLAY=:7` in the launch options.
 
 ## Debug tips
 - Use the `debugoptimized` Remix zip + `logLevel = Trace`, `logApiCalls = True`, `logAllCommands = True`
