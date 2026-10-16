@@ -934,6 +934,25 @@ static BOOL D3DGlobal_InitializeDirect3D( void )
 	return 1;
 }
 
+// BorderlessFullscreen: run D3D windowed, with the window covering the whole monitor
+static BOOL D3DGlobal_BorderlessFullscreen(HWND hwnd, BOOL isWindowed)
+{
+	if (isWindowed || !D3DGlobal.settings.borderlessFullscreen) return isWindowed;
+	HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+	MONITORINFO mi;
+	ZeroMemory(&mi, sizeof(mi));
+	mi.cbSize = sizeof(mi);
+	if (GetMonitorInfo(mon, &mi)) {
+		int w = mi.rcMonitor.right - mi.rcMonitor.left;
+		int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+		SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, w, h, SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+		logPrintf("BorderlessFullscreen: window moved to %d,%d size %dx%d, D3D runs windowed\n", (int)mi.rcMonitor.left, (int)mi.rcMonitor.top, w, h);
+	} else {
+		logPrintf("BorderlessFullscreen: GetMonitorInfo failed, D3D runs windowed\n");
+	}
+	return 1;
+}
+
 OPENGL_API HGLRC WINAPI wrap_wglCreateContext( HDC hdc )
 {
 	//logPrintf("wrap_wglCreateContext( %x )\n", hdc);
@@ -967,6 +986,7 @@ OPENGL_API HGLRC WINAPI wrap_wglCreateContext( HDC hdc )
 	D3DGlobal.settings.multisample = D3DGlobal_GetRegistryValue( "MultiSample", "Settings", 0 );
 	D3DGlobal.settings.projectionFix = D3DGlobal_GetRegistryValue( "ProjectionFix", "Settings", 0 );
 	D3DGlobal.settings.projectionMaxZFar = D3DGlobal_GetRegistryValue( "ProjectionMaxZFar", "Settings", 0 );
+	D3DGlobal.settings.borderlessFullscreen = D3DGlobal_GetRegistryValue( "BorderlessFullscreen", "Settings", 0 );
 	D3DGlobal.settings.drawcallFastPath = D3DGlobal_GetRegistryValue( "DrawCallFastPath", "Settings", 0 );
 	D3DGlobal.settings.texcoordFix = D3DGlobal_GetRegistryValue( "TexCoordFix", "Settings", 0 );
 	D3DGlobal.settings.useSSE = D3DGlobal_GetRegistryValue( "UseSSE", "Settings", 0 );
@@ -1041,6 +1061,7 @@ OPENGL_API HGLRC WINAPI wrap_wglCreateContext( HDC hdc )
 	logPrintf("\n");
 
 	BOOL isWindowed = winstyle & (WS_BORDER|WS_CAPTION|WS_CHILD);
+	isWindowed = D3DGlobal_BorderlessFullscreen(D3DGlobal.hWnd, isWindowed);
 
 	if ((clientrect.right - clientrect.left <= 0) ||
 		(clientrect.bottom - clientrect.top <= 0)) {
@@ -1352,6 +1373,7 @@ OPENGL_API BOOL WINAPI wrap_wglMakeCurrent(HDC hdc, HGLRC hglrc)
 			GetClientRect(D3DGlobal.hWnd, &clientrect);
 			winstyle = GetWindowLong(D3DGlobal.hWnd, GWL_STYLE);
 			BOOL isWindowed = winstyle & (WS_BORDER|WS_CAPTION|WS_CHILD);
+			isWindowed = D3DGlobal_BorderlessFullscreen(D3DGlobal.hWnd, isWindowed);
 
 			if (!D3DGlobal_SetupPresentParams (clientrect.right, clientrect.bottom, D3DGlobal.iBPP, isWindowed)) {
 				logPrintf("wglMakeCurrent: SetupPresentParams failed\n");

@@ -158,6 +158,7 @@ typedef struct D3DGlobal_s
 		DWORD				multisample;
 		DWORD				projectionFix;
 		DWORD				projectionMaxZFar;
+		DWORD				borderlessFullscreen;
 		DWORD				texcoordFix;
 		DWORD				drawcallFastPath;
 		DWORD				useSSE;

@@ -26,6 +26,20 @@ DECLSPEC_NORETURN void __cdecl hk_exit(int code)
 	TerminateProcess(GetCurrentProcess(), code);
 }
 
+static void bf_log_once()
+{
+	static bool logged = false;
+	if ( !logged ) { logged = true; logPrintf( "BorderlessFullscreen: suppressing ChangeDisplaySettings*\n" ); }
+}
+static LONG (WINAPI *fp_CDSA)( DEVMODEA*, DWORD ) = ChangeDisplaySettingsA;
+static LONG (WINAPI *fp_CDSW)( DEVMODEW*, DWORD ) = ChangeDisplaySettingsW;
+static LONG (WINAPI *fp_CDSExA)( LPCSTR, DEVMODEA*, HWND, DWORD, LPVOID ) = ChangeDisplaySettingsExA;
+static LONG (WINAPI *fp_CDSExW)( LPCWSTR, DEVMODEW*, HWND, DWORD, LPVOID ) = ChangeDisplaySettingsExW;
+static LONG WINAPI hk_CDSA( DEVMODEA*, DWORD ) { bf_log_once(); return DISP_CHANGE_SUCCESSFUL; }
+static LONG WINAPI hk_CDSW( DEVMODEW*, DWORD ) { bf_log_once(); return DISP_CHANGE_SUCCESSFUL; }
+static LONG WINAPI hk_CDSExA( LPCSTR, DEVMODEA*, HWND, DWORD, LPVOID ) { bf_log_once(); return DISP_CHANGE_SUCCESSFUL; }
+static LONG WINAPI hk_CDSExW( LPCWSTR, DEVMODEW*, HWND, DWORD, LPVOID ) { bf_log_once(); return DISP_CHANGE_SUCCESSFUL; }
+
 int hook_dll_on_load_check()
 {
 	if (DetourIsHelperProcess()) {
@@ -186,6 +200,26 @@ void hook_do_init(const char *exename, const char* dllname, const char *gamename
 			HMODULE hm = 0;
 			GetModuleHandleEx( GET_MODULE_HANDLE_EX_FLAG_PIN, dllname, &hm );
 		}
+	}
+
+	if ( 0 != D3DGlobal_GetRegistryValue("BorderlessFullscreen", "Settings", 0 ) )
+	{
+		DetourTransactionBegin();
+		DetourUpdateThread( GetCurrentThread() );
+		error = DetourAttach( &(PVOID&)fp_CDSA, (PVOID)hk_CDSA );
+		if ( error != NO_ERROR ) logPrintf( "Hookinit: failed to intercept %s: %d \n", "ChangeDisplaySettingsA", error );
+		error = DetourAttach( &(PVOID&)fp_CDSW, (PVOID)hk_CDSW );
+		if ( error != NO_ERROR ) logPrintf( "Hookinit: failed to intercept %s: %d \n", "ChangeDisplaySettingsW", error );
+		error = DetourAttach( &(PVOID&)fp_CDSExA, (PVOID)hk_CDSExA );
+		if ( error != NO_ERROR ) logPrintf( "Hookinit: failed to intercept %s: %d \n", "ChangeDisplaySettingsExA", error );
+		error = DetourAttach( &(PVOID&)fp_CDSExW, (PVOID)hk_CDSExW );
+		if ( error != NO_ERROR ) logPrintf( "Hookinit: failed to intercept %s: %d \n", "ChangeDisplaySettingsExW", error );
+		error = DetourTransactionCommit();
+		if ( error != NO_ERROR ) logPrintf( "Hookinit: DetourTransactionCommit failed: %d \n", error );
+
+		//pin our handle so that we do not get unloaded on FreeLibrary
+		HMODULE hm = 0;
+		GetModuleHandleEx( GET_MODULE_HANDLE_EX_FLAG_PIN, dllname, &hm );
 	}
 
     hook_surface_sorting_do_init();
