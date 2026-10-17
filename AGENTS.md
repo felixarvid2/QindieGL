@@ -48,40 +48,53 @@ requirement to switch models in other tools.
 - Review every returned diff and actual check output before accepting the work.
   A subagent's success message alone is not verification.
 
-## Model routing and Gemini triage
+## Model routing and external helpers
 
-For Codex work, use this model split requested by Felix:
+Use external models as the default workers to reduce Codex usage:
 
 | Work | Model |
 | --- | --- |
-| Read-only summaries of selected logs, documentation comparisons, fact extraction from supplied excerpts | Gemini `gemini-3.1-flash-lite` through the local `gemini-triage` skill |
-| Routine exploration, validation orchestration, documentation, and exact mechanical edits | GPT-6 Luna |
-| Substantial implementation, difficult debugging, and focused final review when needed | GPT-6.1 Sol |
-| Disabled for this project unless Felix explicitly changes this preference | GPT-6 Astra |
+| Routine source exploration, log analysis, documentation and small patch proposals | NVIDIA `z-ai/glm-5.3-flash` |
+| Substantial implementation, difficult debugging and design proposals | NVIDIA `z-ai/glm-5.3` |
+| Focused review of substantial changes and alternative failure explanations | NVIDIA `deepseek-ai/deepseek-v4.1-flash` |
+| Bulk summaries and simple fact extraction | Gemini `gemini-3.1-flash-lite` |
+| Local tools, applying reviewed patches, tests and Git operations | GPT-6 Luna |
+| Concrete unresolved questions and consequential final review | GPT-6.1 Sol |
+| Disabled unless Felix explicitly changes this preference | GPT-6 Astra |
 
-After usage-limit feedback on 2026-10-17, prefer Gemini and Luna for bounded
-work before escalating a concrete unresolved question to Sol. Keep returns
-concise and evidence-based. Reuse verified results when inputs are unchanged;
-repeat broad captures or reviews only when a new change or failure warrants it.
+The local NVIDIA helper and instructions are in
+`~/.codex/skills/external-models/SKILL.md`; Gemini uses
+`~/.codex/skills/gemini-triage/SKILL.md`. These are external API helpers,
+not native Codex subagents. They propose patches or findings; local execution
+retains control of files, game sessions, Steam and Git. Never accept a model's
+claim that checks ran without running them locally.
 
-Gemini is an external API helper, not a native Codex subagent. It receives only
-explicitly selected public project excerpts or sanitized logs, has no tools or
-write access, and cannot validate builds. Codex reviews its findings and checks
-source references before acting. Use local search for simple lookups.
+Felix authorized selected project code, unpublished changes and relevant logs
+as external context. Send task-relevant excerpts, not the conversation history
+or entire repositories. Credentials stay in `~/Documents/glm-nvidia.md`,
+`~/Documents/deepseek-nvidia.md` and `~/Documents/gemini-api.md`; never include
+them in prompts, arguments, logs or git. Keep game assets, saves and unrelated
+private files outside task packets.
 
-The owner's local helper is
-`~/.codex/skills/gemini-triage/scripts/triage.py`; consult that skill's `SKILL.md`
-for invocation. The credential stays in `~/Documents/gemini-api.md`, outside the
-repos, and must never appear in prompts, command arguments, URLs, logs, or git.
-Do not upload game assets or private data as context. Free-tier data handling
-follows Google's applicable terms.
+NVIDIA usage is free-only: verify the configured endpoint/model before activation;
+never enable billing, purchase credits or route to paid partner endpoints.
+The API has no per-request free-only flag. Gemini's project was confirmed on
+2026-10-17 to have billing disabled. Stop a provider for the task on quota,
+authentication or unavailable-model errors; do not rotate keys to bypass limits.
+Try another verified free helper, then Luna if needed; no automatic Sol escalation.
 
-Felix confirmed the API project uses the Free tier with billing disabled on
-2026-10-17. Free pricing depends on that project setting; the API has no
-per-request free-only flag. Do not enable billing. Pin the selected model, keep
-requests bounded, and stop on quota errors; never silently retry or switch to a
-paid service/model. If the helper or quota is unavailable, use the existing
-Codex roles. The helper is a local installation, not a repo dependency.
+Keep full responses locally and return concise summaries, artifact paths and
+actual check results. Default packets are at most 64 KB; analysis output is
+capped at 2,000 tokens and patch output at 8,000. Limit a bounded task to three
+NVIDIA generation requests across models. Reuse successful results when task,
+model and inputs are unchanged. Review substantial changes with DeepSeek when
+useful; do not duplicate reviews or repeat checks without a concrete reason.
+Report measured provider usage; do not invent Codex savings percentages.
+
+Keep task artifacts, worktrees and runtime recovery backups on persistent
+storage. The 2026-10-17 laptop restart was caused by battery depletion, as
+confirmed by Felix. Check external power before game tests, keep runtime
+ownership serialized and restore the owner's settings on exit.
 
 ## Implementation boundaries
 
