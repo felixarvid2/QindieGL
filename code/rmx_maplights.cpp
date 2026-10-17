@@ -12,7 +12,6 @@
 #include <vector>
 #include <map>
 
-#include "fnv.h"
 #include "d3d_wrapper.hpp"
 #include "d3d_global.hpp"
 
@@ -58,6 +57,22 @@ struct maplight_t
 
 static std::vector<maplight_t> g_lights;
 static ULONGLONG g_load_tick = 0;
+
+struct maplight_create_stats_t
+{
+	unsigned long attempted, success, successNonzero, successZero, failed;
+	bool haveFirstError;
+	remixapi_ErrorCode firstError;
+};
+
+static maplight_create_stats_t g_create_stats;
+static bool g_collect_create_stats;
+static uint64_t g_maplight_hash_serial = 0;
+static bool g_maplight_hash_exhaustion_logged = false;
+static unsigned long g_draw_attempted, g_draw_success, g_draw_failed;
+static unsigned long g_draw_frames = 120; // collect only after the first load
+static bool g_draw_have_first_error, g_draw_summary_pending;
+static remixapi_ErrorCode g_draw_first_error;
 
 // Light formula, read per map from <game>_customise.ini: [maplights.<map>], falling back to [maplights.global].
 // For files with a "format raw" line (intensity column = the BSP light value):
@@ -268,11 +283,50 @@ static bool maplights_create( maplight_t &l, float factor )
 	l.factor = factor;
 	if ( factor <= 0.0f )
 		return true;
+	// Use a fresh identity for every creation. Remix Plus can defer destruction,
+	// so reusing a destroyed handle during reload may alias that pending removal.
+	if ( g_maplight_hash_serial >= 0x0000FFFFFFFFFFFFull )
+	{
+		if ( !g_maplight_hash_exhaustion_logged )
+		{
+			logPrintf( "MapLights: %s unique light identity space exhausted\n", g_mapname );
+			g_maplight_hash_exhaustion_logged = true;
+		}
+		return false;
+	}
+	l.info.hash = 0x4D4C000000000000ull | ++g_maplight_hash_serial;
 	l.info.pNext = l.isSun ? (void *)&l.distant : (void *)&l.sphere;
 	l.info.radiance.x = l.radiance.x * factor;
 	l.info.radiance.y = l.radiance.y * factor;
 	l.info.radiance.z = l.radiance.z * factor;
-	return remixInterface.CreateLight( &l.info, &l.handle ) == REMIXAPI_ERROR_CODE_SUCCESS;
+	if ( g_collect_create_stats ) g_create_stats.attempted++;
+	remixapi_ErrorCode rc = remixInterface.CreateLight( &l.info, &l.handle );
+	if ( rc == REMIXAPI_ERROR_CODE_SUCCESS )
+	{
+		if ( g_collect_create_stats )
+		{
+			g_create_stats.success++;
+			if ( l.handle ) g_create_stats.successNonzero++;
+			else g_create_stats.successZero++;
+		}
+		return true;
+	}
+	if ( g_collect_create_stats ) g_create_stats.failed++;
+	if ( g_collect_create_stats && !g_create_stats.haveFirstError )
+	{
+		g_create_stats.haveFirstError = true;
+		g_create_stats.firstError = rc;
+	}
+	return false;
+}
+
+static void maplights_log_create_summary()
+{
+	logPrintf( "MapLights: %s CreateLight attempted %lu success %lu nonzero %lu zero %lu failed %lu first_error %d\n",
+		g_mapname, g_create_stats.attempted, g_create_stats.success, g_create_stats.successNonzero,
+		g_create_stats.successZero, g_create_stats.failed,
+		g_create_stats.haveFirstError ? (int)g_create_stats.firstError : 0 );
+	g_collect_create_stats = false;
 }
 
 // Hand fixes for generated lights: rtx-remix/maplights/<map>.override, one change per line:
@@ -348,8 +402,18 @@ static void maplights_read_overrides( const std::string &file, std::map<int, map
 
 static void maplights_load()
 {
+	ZeroMemory( &g_create_stats, sizeof( g_create_stats ) );
+	g_collect_create_stats = true;
+	g_draw_attempted = g_draw_success = g_draw_failed = g_draw_frames = 0;
+	g_draw_have_first_error = false;
+	g_draw_summary_pending = true;
+	g_draw_first_error = REMIXAPI_ERROR_CODE_SUCCESS;
 	std::string dir = maplights_game_dir();
-	if ( dir.empty() ) return;
+	if ( dir.empty() )
+	{
+		maplights_log_create_summary();
+		return;
+	}
 	std::string file = dir + "\\rtx-remix\\maplights\\" + g_mapname + ".lights";
 	std::string ovrfile = dir + "\\rtx-remix\\maplights\\" + g_mapname + ".override";
 	maplights_watch( file, ovrfile );
@@ -358,6 +422,7 @@ static void maplights_load()
 	if ( !f )
 	{
 		logPrintf( "MapLights: no light file '%s'\n", file.c_str() );
+		maplights_log_create_summary();
 		return;
 	}
 	std::vector<std::string> lines;
@@ -449,22 +514,19 @@ static void maplights_load()
 			continue;
 		}
 		// hand overrides by index (file lights) or for the sun
-		uint32_t hashIdx;
 		const maplight_ovr_t *o = NULL;
 		if ( isSun )
 		{
-			hashIdx = 0x7FFF;
 			if ( ovr.count( -1 ) ) o = &ovr[-1];
 		}
 		else if ( fromFile )
 		{
-			hashIdx = (uint32_t)fileLight;
 			if ( ovr.count( fileLight ) ) o = &ovr[fileLight];
 			fileLight++;
 		}
 		else
 		{
-			hashIdx = 0x8000u + (uint32_t)added++;
+			added++;
 		}
 		if ( o )
 		{
@@ -544,9 +606,7 @@ static void maplights_load()
 			l.styleLen = l.styleStr ? strlen( l.styleStr ) : 0;
 		}
 
-		uint32_t h = fnv_32a_str( g_mapname, 0x4D4C ); // "ML"
 		l.info.sType = REMIXAPI_STRUCT_TYPE_LIGHT_INFO;
-		l.info.hash = ( (uint64_t)h << 32 ) | hashIdx; // stable per map + light index
 
 		// animated lights start at the style's first character; the first draw corrects it
 		float f0 = l.styleStr ? (float)( l.styleStr[0] - 'a' ) / (float)( 'm' - 'a' ) : 1.0f;
@@ -561,6 +621,7 @@ static void maplights_load()
 	}
 	logPrintf( "MapLights: loaded %d lights (%d animated, sun %s, %d added and %d removed by overrides) from '%s'\n",
 		(int)g_lights.size(), animated, haveSun ? "yes" : "no", added, removed, file.c_str() );
+	maplights_log_create_summary();
 	if ( raw )
 		logPrintf( "MapLights: raw format, scale %g exponent %g ref %g radius %g sun_scale %g\n", prm.scale, prm.exponent, prm.ref, prm.radius, prm.sun_scale );
 	else
@@ -605,6 +666,14 @@ void qdx_maplights_draw()
 	if ( !D3DGlobal.settings.game.mapLights )
 		return;
 
+	bool collectDrawStats = g_draw_frames < 120;
+	bool drawSummaryFrame = false;
+	if ( collectDrawStats )
+	{
+		g_draw_frames++;
+		drawSummaryFrame = g_draw_summary_pending || g_draw_frames == 120;
+	}
+	unsigned long liveHandles = 0;
 	size_t tick = (size_t)( ( GetTickCount64() - g_load_tick ) / 100 ); // 10 Hz
 	for ( size_t i = 0; i < g_lights.size(); i++ )
 	{
@@ -621,7 +690,34 @@ void qdx_maplights_draw()
 			}
 		}
 		if ( l.handle )
-			remixInterface.DrawLightInstance( l.handle );
+		{
+			liveHandles++;
+			if ( collectDrawStats )
+			{
+				g_draw_attempted++;
+				remixapi_ErrorCode rc = remixInterface.DrawLightInstance( l.handle );
+				if ( rc == REMIXAPI_ERROR_CODE_SUCCESS )
+					g_draw_success++;
+				else
+				{
+					g_draw_failed++;
+					if ( !g_draw_have_first_error )
+					{
+						g_draw_have_first_error = true;
+						g_draw_first_error = rc;
+					}
+				}
+			}
+			else
+				remixInterface.DrawLightInstance( l.handle );
+		}
+	}
+	if ( drawSummaryFrame )
+	{
+		logPrintf( "MapLights: %s static draw frame %lu attempted %lu success %lu failed %lu first_error %d live_handles %lu\n",
+			g_mapname, g_draw_frames, g_draw_attempted, g_draw_success, g_draw_failed,
+			g_draw_have_first_error ? (int)g_draw_first_error : 0, liveHandles );
+		g_draw_summary_pending = false;
 	}
 }
 #endif //QINDIEGLSRC_NO_REMIX

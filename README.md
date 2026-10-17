@@ -16,6 +16,17 @@
 >
 > The Anachronox Remix mod and tools are in [felixarvid2/anoxrtx](https://github.com/felixarvid2/anoxrtx).
 
+Map-light reloads use a fresh API identity for every creation. On the tested Remix Plus 1.5.1
+runtime, reusing a destroyed identity could leave replacement lights invisible despite successful
+API return codes. File-based `.override` indices remain unchanged; API hashes are instance identities
+and should not be used as persistent per-map light identifiers.
+
+`QindieGL.log` reports one creation summary per load and static-light draw summaries at frames 1 and
+120. These confirm client calls and handles, not GPU rendering. The existing-light edit and scale
+reload regressions were visually verified in Rowdy's under Proton; stock Remix and MSVC remain
+untested for this change. See the [investigation](https://github.com/felixarvid2/anoxrtx/blob/5633e3dc3048272db436db0d7bab92ebbb39b46f/docs/maplight-api-check.md)
+for the reproduction and scope.
+
 ![QindieGL Logo](logo/QIndieGL-Logo-small.png?raw=true)
 
 ## What's special about this fork?
