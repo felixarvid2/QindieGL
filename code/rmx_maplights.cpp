@@ -16,6 +16,7 @@
 #include "d3d_global.hpp"
 
 #define MAPLIGHTS_MAX 4096
+#define MAPLIGHTS_APPLY_DELAY_FRAMES 120
 
 static char g_mapname[128] = { 0 };
 static volatile LONG g_map_changed = 0;
@@ -56,6 +57,85 @@ struct maplight_t
 
 static std::vector<maplight_t> g_lights;
 static ULONGLONG g_load_tick = 0;
+
+// Light formula, read per map from <game>_customise.ini: [maplights.<map>], falling back to [maplights.global].
+// For files with a "format raw" line (intensity column = the BSP light value):
+//   intensity = scale * ref * (light / ref) ^ exponent      (exponent 2 = light^2 / ref, 1 = linear)
+//   radius    = the file's radius if > 0, otherwise radius
+// Files without it carry precomputed values and only get scale. Suns get scale * sun_scale.
+struct maplights_params_t
+{
+	float scale, exponent, ref, radius, sun_scale;
+};
+
+static maplights_params_t maplights_read_params()
+{
+	maplights_params_t p;
+	float iniScale = D3DGlobal.settings.game.mapLightsScale ? (float)D3DGlobal.settings.game.mapLightsScale / 100.0f : 1.0f;
+	p.scale = qdx_readmapconfflt( "maplights", "scale", iniScale );
+	p.exponent = qdx_readmapconfflt( "maplights", "exponent", 2.0f );
+	p.ref = qdx_readmapconfflt( "maplights", "ref", 300.0f );
+	p.radius = qdx_readmapconfflt( "maplights", "radius", 4.0f );
+	p.sun_scale = qdx_readmapconfflt( "maplights", "sun_scale", 1.0f );
+	if ( p.ref <= 0.0f ) p.ref = 300.0f;
+	return p;
+}
+
+// files watched for hot reload: the map's .lights file and <game>_customise.ini
+static std::string g_watch_files[2];
+static FILETIME g_watch_times[2];
+static ULONGLONG g_watch_tick = 0;
+
+static FILETIME maplights_mtime( const std::string &file )
+{
+	FILETIME t = { 0, 0 };
+	WIN32_FILE_ATTRIBUTE_DATA a;
+	if ( !file.empty() && GetFileAttributesExA( file.c_str(), GetFileExInfoStandard, &a ) )
+		t = a.ftLastWriteTime;
+	return t;
+}
+
+static std::string maplights_game_dir()
+{
+	char path[MAX_PATH];
+	DWORD len = GetModuleFileNameA( NULL, path, MAX_PATH );
+	if ( len == 0 || len >= MAX_PATH ) return std::string();
+	char *slash = strrchr( path, '\\' );
+	if ( !slash ) return std::string();
+	*slash = 0;
+	return std::string( path );
+}
+
+static void maplights_watch( const std::string &lights_file )
+{
+	char name[128];
+	const char *gamename = D3DGlobal_GetGameName();
+	const char *stripped = gamename ? strchr( gamename, '.' ) : NULL;
+	snprintf( name, sizeof( name ), "%s_customise.ini", stripped ? stripped + 1 : ( gamename ? gamename : "" ) );
+	g_watch_files[0] = lights_file;
+	g_watch_files[1] = maplights_game_dir() + "\\" + name;
+	for ( int i = 0; i < 2; i++ )
+		g_watch_times[i] = maplights_mtime( g_watch_files[i] );
+}
+
+// true once per change of a watched file (checked at most once a second)
+static bool maplights_watch_changed()
+{
+	ULONGLONG now = GetTickCount64();
+	if ( now - g_watch_tick < 1000 ) return false;
+	g_watch_tick = now;
+	bool changed = false;
+	for ( int i = 0; i < 2; i++ )
+	{
+		FILETIME t = maplights_mtime( g_watch_files[i] );
+		if ( CompareFileTime( &t, &g_watch_times[i] ) != 0 )
+		{
+			g_watch_times[i] = t;
+			changed = true;
+		}
+	}
+	return changed;
+}
 void qdx_maplights_set_map( const char *name )
 {
 	char tmp[128];
@@ -104,13 +184,10 @@ static bool maplights_create( maplight_t &l, float factor )
 
 static void maplights_load()
 {
-	char path[MAX_PATH];
-	DWORD len = GetModuleFileNameA( NULL, path, MAX_PATH );
-	if ( len == 0 || len >= MAX_PATH ) return;
-	char *slash = strrchr( path, '\\' );
-	if ( !slash ) return;
-	*slash = 0;
-	std::string file = std::string( path ) + "\\rtx-remix\\maplights\\" + g_mapname + ".lights";
+	std::string dir = maplights_game_dir();
+	if ( dir.empty() ) return;
+	std::string file = dir + "\\rtx-remix\\maplights\\" + g_mapname + ".lights";
+	maplights_watch( file );
 
 	FILE *f = fopen( file.c_str(), "r" );
 	if ( !f )
@@ -119,10 +196,11 @@ static void maplights_load()
 		return;
 	}
 
-	float scale = D3DGlobal.settings.game.mapLightsScale ? (float)D3DGlobal.settings.game.mapLightsScale / 100.0f : 1.0f;
+	maplights_params_t prm = maplights_read_params();
+	float scale = prm.scale;
 	char line[512];
 	int lineno = 0, bad = 0, animated = 0;
-	bool haveSun = false;
+	bool haveSun = false, raw = false;
 	g_load_tick = GetTickCount64();
 	while ( fgets( line, sizeof( line ), f ) )
 	{
@@ -137,6 +215,11 @@ static void maplights_load()
 		for ( char *t = strtok( p, " \t\r\n" ); t && nt < 24; t = strtok( NULL, " \t\r\n" ) )
 			tok[nt++] = t;
 
+		if ( nt == 2 && _stricmp( tok[0], "format" ) == 0 )
+		{
+			raw = _stricmp( tok[1], "raw" ) == 0;
+			continue;
+		}
 		bool isSun = nt > 0 && _stricmp( tok[0], "sun" ) == 0;
 		float v[12];
 		int nv = 0, style = 0;
@@ -212,9 +295,10 @@ static void maplights_load()
 			l.distant.angularDiameterDegrees = v[7];
 			l.distant.volumetricRadianceScale = 0.0f;
 			intensity = v[6];
-			l.radiance.x = v[3] * intensity * scale;
-			l.radiance.y = v[4] * intensity * scale;
-			l.radiance.z = v[5] * intensity * scale;
+			intensity *= scale * prm.sun_scale;
+			l.radiance.x = v[3] * intensity;
+			l.radiance.y = v[4] * intensity;
+			l.radiance.z = v[5] * intensity;
 		}
 		else
 		{
@@ -222,7 +306,7 @@ static void maplights_load()
 			l.sphere.position.x = v[0];
 			l.sphere.position.y = v[1];
 			l.sphere.position.z = v[2];
-			l.sphere.radius = v[7];
+			l.sphere.radius = ( raw && v[7] <= 0.0f ) ? prm.radius : v[7];
 			l.sphere.shaping_hasvalue = 0;
 			if ( nv == 12 && v[11] > 0.0f )
 			{
@@ -239,9 +323,11 @@ static void maplights_load()
 				}
 			}
 			l.sphere.volumetricRadianceScale = 0.0f;
-			l.radiance.x = v[3] * v[6] * scale;
-			l.radiance.y = v[4] * v[6] * scale;
-			l.radiance.z = v[5] * v[6] * scale;
+			intensity = raw ? prm.ref * powf( v[6] > 0.0f ? v[6] / prm.ref : 0.0f, prm.exponent ) : v[6];
+			intensity *= scale;
+			l.radiance.x = v[3] * intensity;
+			l.radiance.y = v[4] * intensity;
+			l.radiance.z = v[5] * intensity;
 			l.styleStr = maplights_style_string( style );
 			l.styleLen = l.styleStr ? strlen( l.styleStr ) : 0;
 		}
@@ -264,19 +350,45 @@ static void maplights_load()
 	}
 	fclose( f );
 	logPrintf( "MapLights: loaded %d lights (%d animated, sun %s) from '%s'\n", (int)g_lights.size(), animated, haveSun ? "yes" : "no", file.c_str() );
+	if ( raw )
+		logPrintf( "MapLights: raw format, scale %g exponent %g ref %g radius %g sun_scale %g\n", prm.scale, prm.exponent, prm.ref, prm.radius, prm.sun_scale );
+	else
+		logPrintf( "MapLights: scale %g sun_scale %g\n", prm.scale, prm.sun_scale );
 }
 
 void qdx_maplights_draw()
 {
-	if ( !D3DGlobal.settings.game.mapLights || !remixOnline )
+	if ( !remixOnline )
 		return;
 
+	// Apply a map change some frames late: setting Remix variables while the game is still bringing up
+	// (and recreating) its device at startup crashes the Remix runtime (seen with 1.5.2 under Proton).
+	static int pending = -1;
 	if ( InterlockedExchange( &g_map_changed, 0 ) )
+		pending = MAPLIGHTS_APPLY_DELAY_FRAMES;
+	else if ( pending < 0 && g_mapname[0] && maplights_watch_changed() )
+	{
+		logPrintf( "MapLights: light file or customise ini changed, reloading '%s'\n", g_mapname );
+		pending = 0;
+	}
+	bool changed = false;
+	if ( pending >= 0 && pending-- == 0 )
+		changed = true;
+	if ( changed )
 	{
 		maplights_destroy();
 		if ( g_mapname[0] )
-			maplights_load();
+		{
+			// per-map Remix variables ([rtxconf.default] / [rtxconf.<map>]) and the map's ini sections
+			qdx_begin_loading_map( g_mapname );
+			if ( D3DGlobal.settings.game.mapLights )
+				maplights_load();
+			else
+				maplights_watch( std::string() );
+		}
 	}
+	if ( !D3DGlobal.settings.game.mapLights )
+		return;
 
 	size_t tick = (size_t)( ( GetTickCount64() - g_load_tick ) / 100 ); // 10 Hz
 	for ( size_t i = 0; i < g_lights.size(); i++ )

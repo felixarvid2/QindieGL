@@ -177,6 +177,7 @@ void qdx_begin_loading_map( const char* mapname )
 
 				rmx_console_printf(PRINT_ALL, "Setting option %s = %s\n", key, value);
 				remixapi_ErrorCode rercd = remixInterface.SetConfigVariable( key, value );
+				logPrintf( "RTX.conf %s: %s = %s%s\n", section, key, value, REMIXAPI_ERROR_CODE_SUCCESS == rercd ? "" : " (failed)" );
 				if ( REMIXAPI_ERROR_CODE_SUCCESS != rercd )
 				{
 					rmx_console_printf( PRINT_ERROR, "RMX failed to set config var %d\n", rercd );
