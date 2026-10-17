@@ -43,6 +43,7 @@ public:
 
 protected:
 	void EnsureBufferSize( int numVerts );
+	bool TryFlashblendLight();
 	UINT ReorderBufferToFVF( int fvf, int fvfsz );
 	void SetupTexCoords( D3DIMBufferVertex *pVertex, int stage );
 

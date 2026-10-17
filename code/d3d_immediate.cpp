@@ -25,6 +25,11 @@
 #include "d3d_immediate.hpp"
 #include "d3d_normals.hpp"
 #include <vector>
+#include "d3d_matrix_stack.hpp"
+#ifndef QINDIEGLSRC_NO_REMIX
+#include "rmx_gen.h"
+#include "rmx_light.h"
+#endif
 
 //==================================================================================
 // OpenGL Immediate Mode
@@ -140,6 +145,93 @@ void D3DIMBuffer :: Begin( GLenum primType )
 	m_bXYZW = false;
 }
 
+
+#ifndef QINDIEGLSRC_NO_REMIX
+// Quake 2 style flashblend dlight: untextured, additive (ONE,ONE), perspective triangle fan whose
+// first vertex has the light colour and whose rim vertices are black. Converts it into a Remix light.
+// Returns true if the draw was consumed (and must be skipped).
+bool D3DIMBuffer :: TryFlashblendLight()
+{
+	const int count = m_vertexCount;
+	if ( count < 8 || !remixOnline )
+		return false;
+	if ( D3DState.TextureState.currentSamplerCount || !D3DState.EnableState.alphaBlendEnabled )
+		return false;
+	if ( D3DState.ColorBufferState.glBlendSrc != GL_ONE || D3DState.ColorBufferState.glBlendDst != GL_ONE )
+		return false;
+	if ( D3DGlobal_IsOrthoProjection() )
+		return false;
+
+	const DWORD c0 = m_pBuffer[0].color;
+	if ( !( c0 & 0xFFFFFF ) )
+		return false;
+	for ( int i = 1; i < count; i++ )
+	{
+		if ( m_pBuffer[i].color & 0xFFFFFF )
+			return false; // rim must be black
+	}
+
+	// the rim is a closed circle: the last vertex repeats the first rim vertex, don't count it twice
+	int rimEnd = count;
+	{
+		const float *a = m_pBuffer[1].position, *b = m_pBuffer[count - 1].position;
+		if ( fabsf( a[0] - b[0] ) + fabsf( a[1] - b[1] ) + fabsf( a[2] - b[2] ) < 1e-3f )
+			rimEnd = count - 1;
+	}
+	const int rim = rimEnd - 1;
+	if ( rim < 6 )
+		return false;
+
+	D3DXVECTOR3 ctr( 0, 0, 0 );
+	for ( int i = 1; i < rimEnd; i++ )
+	{
+		const float *p = m_pBuffer[i].position;
+		ctr.x += p[0]; ctr.y += p[1]; ctr.z += p[2];
+	}
+	ctr.x /= rim; ctr.y /= rim; ctr.z /= rim;
+
+	float rad = 0, radmin = 1e30f, radmax = 0;
+	for ( int i = 1; i < rimEnd; i++ )
+	{
+		const float *p = m_pBuffer[i].position;
+		D3DXVECTOR3 d( p[0] - ctr.x, p[1] - ctr.y, p[2] - ctr.z );
+		float l = D3DXVec3Length( &d );
+		rad += l;
+		if ( l < radmin ) radmin = l;
+		if ( l > radmax ) radmax = l;
+	}
+	rad /= rim;
+	if ( rad < 1e-3f || ( radmax - radmin ) > rad * 0.1f )
+		return false; // rim is not a circle around the centre
+
+	D3DXVECTOR3 wpos = ctr;
+	if ( D3DGlobal.modelMatrixStack )
+	{
+		D3DStateMatrix &mm = D3DGlobal.modelMatrixStack->top();
+		if ( !mm.is_identity() )
+			D3DXVec3TransformCoord( &wpos, &ctr, mm );
+	}
+
+	// colour*0.2 is stored as 8 bit; undo the 0.2 factor
+	float color[3] = {
+		(float)( ( c0 >> 16 ) & 0xFF ) / 255.0f * 5.0f,
+		(float)( ( c0 >> 8 ) & 0xFF ) / 255.0f * 5.0f,
+		(float)( c0 & 0xFF ) / 255.0f * 5.0f };
+	float intensity = rad / 0.35f;
+
+	static int s_logged = 0;
+	if ( s_logged < 8 )
+	{
+		s_logged++;
+		logPrintf( "flashblend light #%d: verts=%d rgb=(%.2f %.2f %.2f) drawradius=%.2f intensity=%.2f pos=(%.1f %.1f %.1f)\n",
+			s_logged, count, color[0], color[1], color[2], rad, intensity, wpos.x, wpos.y, wpos.z );
+	}
+
+	qdx_light_add( LIGHT_DYNAMIC, 0, &wpos.x, NULL, color, intensity );
+	return true;
+}
+#endif
+
 void D3DIMBuffer :: End( )
 {
 	if ( !m_vertexCount || !m_bBegan ) 
@@ -153,6 +245,17 @@ void D3DIMBuffer :: End( )
 			return;
 		}
 	}
+
+#ifndef QINDIEGLSRC_NO_REMIX
+	if ( D3DGlobal.settings.game.flashblendLights && m_primitiveType == GL_TRIANGLE_FAN )
+	{
+		if ( TryFlashblendLight() )
+		{
+			m_bBegan = false;
+			return;
+		}
+	}
+#endif
 
 	if ( m_primitiveType == GL_LINE_LOOP ) {
 		//close line
