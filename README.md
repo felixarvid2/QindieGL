@@ -11,6 +11,8 @@
 >   and live reload while playing
 > - `dlights`: the game's dynamic lights (muzzle flashes, explosions) as Remix lights (Anachronox)
 > - `DumpTextures`: Remix texture hashes and TGA dumps, to make replacements without a capture
+> - `proctex`: freezes procedural textures (Anachronox lava) to a stable hash so Remix can replace them
+> - works with the [Remix Plus](https://github.com/RemixProjGroup/dxvk-remix) runtime as well as stock RTX Remix
 >
 > The Anachronox Remix mod and tools are in [felixarvid2/anoxrtx](https://github.com/felixarvid2/anoxrtx).
 
