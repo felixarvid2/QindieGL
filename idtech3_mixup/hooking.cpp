@@ -90,6 +90,19 @@ static void __cdecl hk_R_RenderView( void *fd )
 	fp_R_RenderView( fd );
 }
 
+// Anachronox anoxgfx.dll texture manager (option proctex): TEX_BindTexture( mgr, handle ) binds the GL texture
+// of a named texture; TEX_GetTexName( mgr, handle, buf, size ) copies its name. Used to freeze procedural
+// textures by name (d3d_texture.cpp).
+extern "C" void qdx_proctex_on_bind( void *mgr, int handle, int ( __stdcall *getname )( void *, int, char *, int ) );
+static int (__stdcall *fp_TEX_BindTexture)( void *, int ) = NULL;
+static int (__stdcall *fp_TEX_GetTexName)( void *, int, char *, int ) = NULL;
+static int __stdcall hk_TEX_BindTexture( void *mgr, int handle )
+{
+	int r = fp_TEX_BindTexture( mgr, handle );
+	if ( r ) qdx_proctex_on_bind( mgr, handle, fp_TEX_GetTexName );
+	return r;
+}
+
 int hook_dll_on_load_check()
 {
 	if (DetourIsHelperProcess()) {
@@ -308,6 +321,27 @@ void hook_do_init(const char *exename, const char* dllname, const char *gamename
 			if ( error != NO_ERROR ) logPrintf( "Hookinit: failed to intercept %s: %d \n", "R_RenderView", error );
 			error = DetourTransactionCommit();
 			if ( error != NO_ERROR ) logPrintf( "Hookinit: DetourTransactionCommit failed: %d \n", error );
+		}
+	}
+
+	if ( D3DGlobal_ReadGameConf( "proctex" ) )
+	{
+		HMODULE hgfx = GetModuleHandleA( "anoxgfx.dll" );
+		fp_TEX_BindTexture = hgfx ? (int (__stdcall *)( void *, int ))GetProcAddress( hgfx, "_TEX_BindTexture@8" ) : NULL;
+		fp_TEX_GetTexName = hgfx ? (int (__stdcall *)( void *, int, char *, int ))GetProcAddress( hgfx, "_TEX_GetTexName@16" ) : NULL;
+		if ( !fp_TEX_BindTexture || !fp_TEX_GetTexName )
+		{
+			logPrintf( "ProcTex: anoxgfx.dll texture functions not found, disabled\n" );
+		}
+		else
+		{
+			DetourTransactionBegin();
+			DetourUpdateThread( GetCurrentThread() );
+			error = DetourAttach( &(PVOID&)fp_TEX_BindTexture, (PVOID)hk_TEX_BindTexture );
+			if ( error != NO_ERROR ) logPrintf( "Hookinit: failed to intercept %s: %d \n", "TEX_BindTexture", error );
+			error = DetourTransactionCommit();
+			if ( error != NO_ERROR ) logPrintf( "Hookinit: DetourTransactionCommit failed: %d \n", error );
+			else logPrintf( "ProcTex: hooked anoxgfx.dll TEX_BindTexture\n" );
 		}
 	}
 
