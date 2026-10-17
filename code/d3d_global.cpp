@@ -919,7 +919,41 @@ static BOOL D3DGlobal_InitializeDirect3D( void )
 					REMIXAPI_VERSION_PATCH );
 			}
 
-			remixapi_ErrorCode status = remix_init( &info, &remixInterface );
+			// The runtime fills its own remixapi_Interface. Remix Plus (RemixProjGroup/dxvk-remix, API 0.1000)
+			// inserts functions in the middle and is twice as long, so take it into a large zeroed buffer and pick
+			// the functions by layout: a pointer beyond the 14 upstream slots means the Remix Plus layout.
+			void *fn[64];
+			ZeroMemory( fn, sizeof( fn ) );
+			remixapi_ErrorCode status = remix_init( &info, (remixapi_Interface *)fn );
+			bool plusLayout = false;
+			for ( int i = 14; i < 64; i++ )
+				if ( fn[i] ) plusLayout = true;
+			if ( !plusLayout )
+			{
+				memcpy( &remixInterface, fn, sizeof( remixInterface ) );
+			}
+			else
+			{
+				// Remix Plus 1.5 order: Shutdown, CreateMaterial, DestroyMaterial, CreateMesh, CreateMeshBatched,
+				// DestroyMesh, SetupCamera, DrawInstance, CreateLight, CreateLightBatched, DestroyLight,
+				// DrawLightInstance, SetConfigVariable, AddTextureHash, RemoveTextureHash, CreateTexture,
+				// DestroyTexture, Startup, Present, SetCameraMediumMaterial, ...
+				remixInterface.Shutdown = (PFN_remixapi_Shutdown)fn[0];
+				remixInterface.CreateMaterial = (PFN_remixapi_CreateMaterial)fn[1];
+				remixInterface.DestroyMaterial = (PFN_remixapi_DestroyMaterial)fn[2];
+				remixInterface.CreateMesh = (PFN_remixapi_CreateMesh)fn[3];
+				remixInterface.DestroyMesh = (PFN_remixapi_DestroyMesh)fn[5];
+				remixInterface.SetupCamera = (PFN_remixapi_SetupCamera)fn[6];
+				remixInterface.DrawInstance = (PFN_remixapi_DrawInstance)fn[7];
+				remixInterface.CreateLight = (PFN_remixapi_CreateLight)fn[8];
+				remixInterface.DestroyLight = (PFN_remixapi_DestroyLight)fn[10];
+				remixInterface.DrawLightInstance = (PFN_remixapi_DrawLightInstance)fn[11];
+				remixInterface.SetConfigVariable = (PFN_remixapi_SetConfigVariable)fn[12];
+				remixInterface.Startup = (PFN_remixapi_Startup)fn[17];
+				remixInterface.Present = (PFN_remixapi_Present)fn[18];
+				remixInterface.SetCameraMediumMaterial = (PFN_remixapi_SetCameraMediumMaterial)fn[19];
+			}
+			logPrintf( "Remix API: %s function layout\n", plusLayout ? "Remix Plus" : "upstream" );
 			if ( status != REMIXAPI_ERROR_CODE_SUCCESS ) {
 				logPrintf( "Warn: Remix API init error %d, did you set 'exposeRemixApi = True' in .trex\\bridge.conf ? \n", status );
 			}
