@@ -48,6 +48,48 @@ static void __cdecl hk_ref_SetMapName( const char *name )
 	fp_ref_SetMapName( name );
 }
 
+// Anachronox ref_gl.dll: R_RenderView( refdef_t *fd ) is not exported. Find it through the push of its error
+// string "R_RenderView: NULL worldmodel", then walk back to the function start (previous function ends with
+// "pop ebp; ret", this one starts with "push ebp; mov ebp, esp"). Works for the original and Chuncki's DLL.
+static void *find_r_renderview( HMODULE mod )
+{
+	static const char needle[] = "R_RenderView: NULL worldmodel";
+	BYTE *base = (BYTE *)mod;
+	IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)( base + ( (IMAGE_DOS_HEADER *)base )->e_lfanew );
+	IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION( nt );
+	DWORD str = 0;
+	for ( int i = 0; i < nt->FileHeader.NumberOfSections && !str; i++ )
+	{
+		BYTE *p = base + sec[i].VirtualAddress;
+		DWORD n = sec[i].Misc.VirtualSize;
+		for ( DWORD j = 0; j + sizeof( needle ) <= n; j++ )
+			if ( memcmp( p + j, needle, sizeof( needle ) ) == 0 ) { str = (DWORD)( p + j ); break; }
+	}
+	if ( !str ) return NULL;
+	for ( int i = 0; i < nt->FileHeader.NumberOfSections; i++ )
+	{
+		if ( !( sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE ) ) continue;
+		BYTE *p = base + sec[i].VirtualAddress;
+		DWORD n = sec[i].Misc.VirtualSize;
+		for ( DWORD j = 0; j + 5 <= n; j++ )
+		{
+			if ( p[j] != 0x68 || *(DWORD *)( p + j + 1 ) != str ) continue;
+			for ( DWORD k = j; k >= 5 && j - k < 0x400; k-- )
+				if ( p[k - 2] == 0x5D && p[k - 1] == 0xC3 && p[k] == 0x55 && p[k + 1] == 0x8B && p[k + 2] == 0xEC )
+					return p + k;
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
+static void (__cdecl *fp_R_RenderView)( void * ) = NULL;
+static void __cdecl hk_R_RenderView( void *fd )
+{
+	qdx_dlights_capture( fd );
+	fp_R_RenderView( fd );
+}
+
 int hook_dll_on_load_check()
 {
 	if (DetourIsHelperProcess()) {
@@ -244,6 +286,26 @@ void hook_do_init(const char *exename, const char* dllname, const char *gamename
 			DetourUpdateThread( GetCurrentThread() );
 			error = DetourAttach( &(PVOID&)fp_ref_SetMapName, (PVOID)hk_ref_SetMapName );
 			if ( error != NO_ERROR ) logPrintf( "Hookinit: failed to intercept %s: %d \n", "ref_SetMapName", error );
+			error = DetourTransactionCommit();
+			if ( error != NO_ERROR ) logPrintf( "Hookinit: DetourTransactionCommit failed: %d \n", error );
+		}
+	}
+
+	if ( D3DGlobal_ReadGameConf( "dlights" ) )
+	{
+		HMODULE hrefgl = GetModuleHandleA( "ref_gl.dll" );
+		fp_R_RenderView = hrefgl ? (void (__cdecl*)( void * ))find_r_renderview( hrefgl ) : NULL;
+		if ( !fp_R_RenderView )
+		{
+			logPrintf( "DLights: ref_gl.dll R_RenderView not found, disabled\n" );
+		}
+		else
+		{
+			logPrintf( "DLights: R_RenderView at ref_gl.dll+0x%x\n", (unsigned)( (BYTE *)fp_R_RenderView - (BYTE *)hrefgl ) );
+			DetourTransactionBegin();
+			DetourUpdateThread( GetCurrentThread() );
+			error = DetourAttach( &(PVOID&)fp_R_RenderView, (PVOID)hk_R_RenderView );
+			if ( error != NO_ERROR ) logPrintf( "Hookinit: failed to intercept %s: %d \n", "R_RenderView", error );
 			error = DetourTransactionCommit();
 			if ( error != NO_ERROR ) logPrintf( "Hookinit: DetourTransactionCommit failed: %d \n", error );
 		}
