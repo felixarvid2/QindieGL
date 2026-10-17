@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include <map>
 
 #include "fnv.h"
 #include "d3d_wrapper.hpp"
@@ -105,11 +106,15 @@ static int g_dl_count = 0;
 static remixapi_LightHandle g_dl_handles[DLIGHTS_MAX];
 static int g_dl_handle_count = 0;
 static int g_dl_logged = 0;
+static float g_viewpos[3];
+static bool g_have_viewpos = false;
 
 void qdx_dlights_capture( const void *refdef )
 {
 	const BYTE *b = (const BYTE *)refdef;
 	if ( !b || IsBadReadPtr( b, REFDEF_DLIGHTS + 4 ) ) return;
+	memcpy( g_viewpos, b + 0x18, sizeof( g_viewpos ) ); // vieworg, as in Quake 2
+	g_have_viewpos = true;
 	int n = *(const int *)( b + REFDEF_NUM_DLIGHTS );
 	const q2dlight_t *dl = *(const q2dlight_t * const *)( b + REFDEF_DLIGHTS );
 	static int calls = 0;
@@ -168,8 +173,9 @@ static void dlights_draw()
 }
 
 // files watched for hot reload: the map's .lights file and <game>_customise.ini
-static std::string g_watch_files[2];
-static FILETIME g_watch_times[2];
+#define WATCH_FILES 3
+static std::string g_watch_files[WATCH_FILES];
+static FILETIME g_watch_times[WATCH_FILES];
 static ULONGLONG g_watch_tick = 0;
 
 static FILETIME maplights_mtime( const std::string &file )
@@ -192,7 +198,7 @@ static std::string maplights_game_dir()
 	return std::string( path );
 }
 
-static void maplights_watch( const std::string &lights_file )
+static void maplights_watch( const std::string &lights_file, const std::string &override_file )
 {
 	char name[128];
 	const char *gamename = D3DGlobal_GetGameName();
@@ -200,7 +206,8 @@ static void maplights_watch( const std::string &lights_file )
 	snprintf( name, sizeof( name ), "%s_customise.ini", stripped ? stripped + 1 : ( gamename ? gamename : "" ) );
 	g_watch_files[0] = lights_file;
 	g_watch_files[1] = maplights_game_dir() + "\\" + name;
-	for ( int i = 0; i < 2; i++ )
+	g_watch_files[2] = override_file;
+	for ( int i = 0; i < WATCH_FILES; i++ )
 		g_watch_times[i] = maplights_mtime( g_watch_files[i] );
 }
 
@@ -211,7 +218,7 @@ static bool maplights_watch_changed()
 	if ( now - g_watch_tick < 1000 ) return false;
 	g_watch_tick = now;
 	bool changed = false;
-	for ( int i = 0; i < 2; i++ )
+	for ( int i = 0; i < WATCH_FILES; i++ )
 	{
 		FILETIME t = maplights_mtime( g_watch_files[i] );
 		if ( CompareFileTime( &t, &g_watch_times[i] ) != 0 )
@@ -268,12 +275,84 @@ static bool maplights_create( maplight_t &l, float factor )
 	return remixInterface.CreateLight( &l.info, &l.handle ) == REMIXAPI_ERROR_CODE_SUCCESS;
 }
 
+// Hand fixes for generated lights: rtx-remix/maplights/<map>.override, one change per line:
+//   N off | N scale S | N color R G B | N move DX DY DZ | N radius R    (N = index of the light in the .lights
+//   file, counting light lines from 0, sun excluded; tools/lights_near.py prints the indices near a position)
+//   sun off | sun scale S
+//   add <a .lights light line>                                            (a new light, same format and units)
+struct maplight_ovr_t
+{
+	bool off, hasColor, hasMove;
+	float scale, radius;
+	float color[3], move[3];
+};
+
+static maplight_ovr_t maplights_ovr_default()
+{
+	maplight_ovr_t o;
+	ZeroMemory( &o, sizeof( o ) );
+	o.scale = 1.0f;
+	o.radius = -1.0f;
+	return o;
+}
+
+static void maplights_read_overrides( const std::string &file, std::map<int, maplight_ovr_t> &ovr, std::vector<std::string> &adds )
+{
+	FILE *f = fopen( file.c_str(), "r" );
+	if ( !f ) return;
+	char line[512];
+	int lineno = 0, bad = 0, n = 0;
+	while ( fgets( line, sizeof( line ), f ) )
+	{
+		lineno++;
+		char *p = line;
+		while ( *p == ' ' || *p == '\t' ) p++;
+		if ( *p == '#' || *p == '\r' || *p == '\n' || *p == 0 ) continue;
+		if ( _strnicmp( p, "add", 3 ) == 0 && ( p[3] == ' ' || p[3] == '\t' ) )
+		{
+			adds.push_back( std::string( p + 4 ) );
+			n++;
+			continue;
+		}
+		char *tok[8];
+		int nt = 0;
+		for ( char *t = strtok( p, " \t\r\n" ); t && nt < 8; t = strtok( NULL, " \t\r\n" ) )
+			tok[nt++] = t;
+		float a[3] = { 0, 0, 0 };
+		for ( int i = 2; i < nt && i < 5; i++ ) a[i - 2] = (float)atof( tok[i] );
+		char *end = tok[0];
+		bool sunTok = nt > 0 && _stricmp( tok[0], "sun" ) == 0;
+		int idx = sunTok ? -1 : ( nt > 0 ? (int)strtol( tok[0], &end, 10 ) : 0 );
+		bool ok = nt >= 2 && ( sunTok || ( end != tok[0] && *end == 0 && idx >= 0 ) );
+		if ( ok )
+		{
+			if ( ovr.find( idx ) == ovr.end() ) ovr[idx] = maplights_ovr_default();
+			maplight_ovr_t &o = ovr[idx];
+			if ( _stricmp( tok[1], "off" ) == 0 && nt == 2 ) o.off = true;
+			else if ( _stricmp( tok[1], "scale" ) == 0 && nt == 3 ) o.scale *= a[0];
+			else if ( _stricmp( tok[1], "radius" ) == 0 && nt == 3 && idx >= 0 ) o.radius = a[0];
+			else if ( _stricmp( tok[1], "color" ) == 0 && nt == 5 && idx >= 0 ) { o.hasColor = true; memcpy( o.color, a, sizeof( a ) ); }
+			else if ( _stricmp( tok[1], "move" ) == 0 && nt == 5 && idx >= 0 ) { o.hasMove = true; memcpy( o.move, a, sizeof( a ) ); }
+			else ok = false;
+		}
+		if ( !ok )
+		{
+			if ( bad++ < 5 ) logPrintf( "MapLights: %s.override:%d: parse error\n", g_mapname, lineno );
+			continue;
+		}
+		n++;
+	}
+	fclose( f );
+	logPrintf( "MapLights: %d overrides from '%s'\n", n, file.c_str() );
+}
+
 static void maplights_load()
 {
 	std::string dir = maplights_game_dir();
 	if ( dir.empty() ) return;
 	std::string file = dir + "\\rtx-remix\\maplights\\" + g_mapname + ".lights";
-	maplights_watch( file );
+	std::string ovrfile = dir + "\\rtx-remix\\maplights\\" + g_mapname + ".override";
+	maplights_watch( file, ovrfile );
 
 	FILE *f = fopen( file.c_str(), "r" );
 	if ( !f )
@@ -281,6 +360,19 @@ static void maplights_load()
 		logPrintf( "MapLights: no light file '%s'\n", file.c_str() );
 		return;
 	}
+	std::vector<std::string> lines;
+	{
+		char buf[512];
+		while ( fgets( buf, sizeof( buf ), f ) )
+			lines.push_back( std::string( buf ) );
+		fclose( f );
+	}
+	size_t nfile = lines.size();
+	std::map<int, maplight_ovr_t> ovr;
+	std::vector<std::string> adds;
+	maplights_read_overrides( ovrfile, ovr, adds );
+	lines.insert( lines.end(), adds.begin(), adds.end() );
+	int fileLight = 0, added = 0, removed = 0;
 
 	maplights_params_t prm = g_prm;
 	float scale = prm.scale;
@@ -288,9 +380,12 @@ static void maplights_load()
 	int lineno = 0, bad = 0, animated = 0;
 	bool haveSun = false, raw = false;
 	g_load_tick = GetTickCount64();
-	while ( fgets( line, sizeof( line ), f ) )
+	for ( size_t li = 0; li < lines.size(); li++ )
 	{
+		strncpy( line, lines[li].c_str(), sizeof( line ) - 1 );
+		line[sizeof( line ) - 1] = 0;
 		lineno++;
+		bool fromFile = li < nfile;
 		char *p = line;
 		while ( *p == ' ' || *p == '\t' ) p++;
 		if ( *p == '#' || *p == '\r' || *p == '\n' || *p == 0 ) continue;
@@ -353,6 +448,36 @@ static void maplights_load()
 			if ( bad++ < 5 ) logPrintf( "MapLights: %s:%d: parse error\n", g_mapname, lineno );
 			continue;
 		}
+		// hand overrides by index (file lights) or for the sun
+		uint32_t hashIdx;
+		const maplight_ovr_t *o = NULL;
+		if ( isSun )
+		{
+			hashIdx = 0x7FFF;
+			if ( ovr.count( -1 ) ) o = &ovr[-1];
+		}
+		else if ( fromFile )
+		{
+			hashIdx = (uint32_t)fileLight;
+			if ( ovr.count( fileLight ) ) o = &ovr[fileLight];
+			fileLight++;
+		}
+		else
+		{
+			hashIdx = 0x8000u + (uint32_t)added++;
+		}
+		if ( o )
+		{
+			if ( o->off ) { removed++; continue; }
+			if ( isSun || !raw )
+				v[6] *= o->scale; // raw light values go through the exponent: the result is scaled below instead
+			if ( !isSun )
+			{
+				if ( o->hasMove ) { v[0] += o->move[0]; v[1] += o->move[1]; v[2] += o->move[2]; }
+				if ( o->hasColor ) { v[3] = o->color[0]; v[4] = o->color[1]; v[5] = o->color[2]; }
+				if ( o->radius >= 0.0f ) v[7] = o->radius;
+			}
+		}
 		if ( g_lights.size() >= MAPLIGHTS_MAX )
 		{
 			logPrintf( "MapLights: light cap %d reached\n", MAPLIGHTS_MAX );
@@ -411,6 +536,7 @@ static void maplights_load()
 			l.sphere.volumetricRadianceScale = 0.0f;
 			intensity = raw ? prm.ref * powf( v[6] > 0.0f ? v[6] / prm.ref : 0.0f, prm.exponent ) : v[6];
 			intensity *= scale;
+			if ( o && raw ) intensity *= o->scale;
 			l.radiance.x = v[3] * intensity;
 			l.radiance.y = v[4] * intensity;
 			l.radiance.z = v[5] * intensity;
@@ -418,10 +544,9 @@ static void maplights_load()
 			l.styleLen = l.styleStr ? strlen( l.styleStr ) : 0;
 		}
 
-		uint32_t idx = (uint32_t)g_lights.size();
 		uint32_t h = fnv_32a_str( g_mapname, 0x4D4C ); // "ML"
 		l.info.sType = REMIXAPI_STRUCT_TYPE_LIGHT_INFO;
-		l.info.hash = ( (uint64_t)h << 32 ) | idx; // stable per map + index
+		l.info.hash = ( (uint64_t)h << 32 ) | hashIdx; // stable per map + light index
 
 		// animated lights start at the style's first character; the first draw corrects it
 		float f0 = l.styleStr ? (float)( l.styleStr[0] - 'a' ) / (float)( 'm' - 'a' ) : 1.0f;
@@ -434,8 +559,8 @@ static void maplights_load()
 		if ( isSun ) haveSun = true;
 		g_lights.push_back( l );
 	}
-	fclose( f );
-	logPrintf( "MapLights: loaded %d lights (%d animated, sun %s) from '%s'\n", (int)g_lights.size(), animated, haveSun ? "yes" : "no", file.c_str() );
+	logPrintf( "MapLights: loaded %d lights (%d animated, sun %s, %d added and %d removed by overrides) from '%s'\n",
+		(int)g_lights.size(), animated, haveSun ? "yes" : "no", added, removed, file.c_str() );
 	if ( raw )
 		logPrintf( "MapLights: raw format, scale %g exponent %g ref %g radius %g sun_scale %g\n", prm.scale, prm.exponent, prm.ref, prm.radius, prm.sun_scale );
 	else
@@ -454,7 +579,9 @@ void qdx_maplights_draw()
 		pending = MAPLIGHTS_APPLY_DELAY_FRAMES;
 	else if ( pending < 0 && g_mapname[0] && maplights_watch_changed() )
 	{
-		logPrintf( "MapLights: light file or customise ini changed, reloading '%s'\n", g_mapname );
+		logPrintf( "MapLights: light file, override or customise ini changed, reloading '%s'\n", g_mapname );
+		if ( g_have_viewpos ) // to find light indices for <map>.override: tools/lights_near.py <map>.lights x y z
+			logPrintf( "MapLights: camera at %.0f %.0f %.0f\n", g_viewpos[0], g_viewpos[1], g_viewpos[2] );
 		pending = 0;
 	}
 	bool changed = false;
@@ -471,7 +598,7 @@ void qdx_maplights_draw()
 			if ( D3DGlobal.settings.game.mapLights )
 				maplights_load();
 			else
-				maplights_watch( std::string() );
+				maplights_watch( std::string(), std::string() );
 		}
 	}
 	dlights_draw();
