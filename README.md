@@ -1,6 +1,19 @@
 # QindieGL
 ## QindieGL Is Not Driver, It's Emulator
 
+> **This is a fork of [whisperglen/QindieGL](https://github.com/whisperglen/QindieGL) by whisperglen**, made to run
+> Anachronox with RTX Remix. It adds:
+> - **Linux support**: a cross-build with llvm-mingw (`linux/`, `CMakeLists.txt`) for use under Wine/Proton
+> - `BorderlessFullscreen`: fullscreen without display mode changes (works around Wine's offset fullscreen image)
+> - `smoothnormals`: generated smooth normals for models
+> - `maplights`: static Remix lights per map from `rtx-remix/maplights/<map>.lights`, with Quake 2 light styles,
+>   sun, a light formula and Remix variables per map in `<game>_customise.ini`, per-light `<map>.override` files,
+>   and live reload while playing
+> - `dlights`: the game's dynamic lights (muzzle flashes, explosions) as Remix lights (Anachronox)
+> - `DumpTextures`: Remix texture hashes and TGA dumps, to make replacements without a capture
+>
+> The Anachronox Remix mod and tools are in [felixarvid2/anoxrtx](https://github.com/felixarvid2/anoxrtx).
+
 ![QindieGL Logo](logo/QIndieGL-Logo-small.png?raw=true)
 
 ## What's special about this fork?
