@@ -674,6 +674,9 @@ extern "C" {
     void*                           pNext;
     uint64_t                        hash;
     remixapi_Float3D                radiance;
+    // Remix Plus 1.5 appends these; older runtimes read only the fields above. Keep zeroed.
+    remixapi_Bool                   isDynamic;
+    remixapi_Bool                   ignoreViewModel;
   } remixapi_LightInfo;
 
   typedef remixapi_ErrorCode(REMIXAPI_PTR* PFN_remixapi_CreateLight)(
