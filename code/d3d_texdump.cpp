@@ -106,6 +106,34 @@ void D3DTexDump_Init()
 		TexDump_SelfTest();
 }
 
+// Remix texture hash of level 0 (works without DumpTextures); false for unsupported formats
+bool D3DTexDump_Hash( D3DTextureObject *tex, unsigned long long *out_hash, const char **out_format )
+{
+	if (!tex || tex->GetTarget() != GL_TEXTURE_2D || !tex->GetD3DTexture())
+		return false;
+	LPDIRECT3DTEXTURE9 d3dtex = (LPDIRECT3DTEXTURE9)tex->GetD3DTexture();
+	D3DSURFACE_DESC desc;
+	if (FAILED( d3dtex->GetLevelDesc( 0, &desc ) ))
+		return false;
+	const int w = (int)desc.Width, h = (int)desc.Height;
+	const int bpp = TexDump_BPP( desc.Format );
+	const int blk = TexDump_BlockBytes( desc.Format );
+	if (!bpp && !blk)
+		return false;
+	const int rowBytes = blk ? ((w + 3) / 4) * blk : w * bpp;
+	const int rows = blk ? (h + 3) / 4 : h;
+	D3DLOCKED_RECT lr;
+	if (FAILED( d3dtex->LockRect( 0, &lr, NULL, D3DLOCK_READONLY ) ))
+		return false;
+	std::vector<unsigned char> tight( (size_t)rowBytes * rows );
+	for (int y = 0; y < rows; ++y)
+		memcpy( &tight[(size_t)y * rowBytes], (const unsigned char*)lr.pBits + (size_t)y * lr.Pitch, rowBytes );
+	d3dtex->UnlockRect( 0 );
+	*out_hash = (unsigned long long)XXH3_64bits( tight.data(), tight.size() );
+	if (out_format) *out_format = D3DGlobal_FormatToString( desc.Format );
+	return true;
+}
+
 void D3DTexDump_Level0( D3DTextureObject *tex )
 {
 	if (!D3DGlobal.settings.dumpTextures || !tex)

@@ -25,6 +25,10 @@
 #include "d3d_object.hpp"
 #include "d3d_texture.hpp"
 #include "d3d_pixels.hpp"
+#include <map>
+#include <string>
+#include <vector>
+#include "fnv.h"
 
 //==================================================================================
 // Texturing
@@ -781,6 +785,91 @@ void D3DTextureObject :: SetMinFilter( GLenum mode )
 	m_glFilter[1] = mode;
 }
 
+//==================================================================================
+// Procedural textures (option proctex, Anachronox): textures the game regenerates every frame (ATD
+// "interform", e.g. levant/proc_lava) get a new Remix hash every frame, so they cannot be replaced.
+// The anoxgfx.dll hooks tell us the game's name for a GL texture (qdx_proctex_on_bind); textures whose
+// name contains one of the proctex_names patterns are frozen: their level 0 is filled once with a flat
+// color derived from the name, and the game's later uploads are skipped. The Remix hash is then
+// XXH3_64 over w*h pixels of bytes (B, G, R, 255), computable offline from the name (see anoxrtx).
+//==================================================================================
+struct proctex_t
+{
+	uint32_t color; // 0x00RRGGBB
+	bool written;
+	std::string name;
+};
+static std::map<GLuint, proctex_t> g_proctex;
+static std::map<GLuint, bool> g_proctex_checked;
+
+static bool proctex_match( const char *lname )
+{
+	static char patterns[512] = { 0 };
+	static bool loaded = false;
+	if ( !loaded )
+	{
+		loaded = true;
+		if ( !D3DGlobal_ReadGameConfStr( "proctex_names", patterns, sizeof( patterns ) ) || !patterns[0] )
+			strcpy( patterns, "proc_lava" );
+	}
+	char buf[512];
+	strncpy( buf, patterns, sizeof( buf ) - 1 );
+	buf[sizeof( buf ) - 1] = 0;
+	for ( char *t = strtok( buf, ", " ); t; t = strtok( NULL, ", " ) )
+		if ( strstr( lname, t ) ) return true;
+	return false;
+}
+
+extern "C" void qdx_proctex_on_bind( void *mgr, int handle, int ( __stdcall *getname )( void *, int, char *, int ) )
+{
+	D3DTextureObject *tex = D3DState.TextureState.currentTexture[D3DState.TextureState.currentTMU][D3D_TEXTARGET_2D];
+	if ( !tex || !tex->GetGLIndex() ) return;
+	GLuint id = tex->GetGLIndex();
+	if ( g_proctex_checked.count( id ) ) return;
+	g_proctex_checked[id] = true;
+	char name[256] = { 0 };
+	if ( !getname( mgr, handle, name, sizeof( name ) - 1 ) || !name[0] ) return;
+	for ( char *c = name; *c; c++ ) *c = (char)tolower( (unsigned char)*c );
+	if ( !proctex_match( name ) ) return;
+	proctex_t p;
+	p.color = fnv_32a_str( name, FNV1_32A_INIT ) & 0x00FFFFFF;
+	p.written = false;
+	p.name = name;
+	g_proctex[id] = p;
+	logPrintf( "ProcTex: '%s' (GL texture %u, %ux%u) will be frozen, color %06X\n", name, id, tex->GetWidth(), tex->GetHeight(), p.color );
+}
+
+// true: the upload is handled here (skipped, or replaced by the frozen proxy)
+static bool proctex_intercept( D3DTextureObject *tex )
+{
+	if ( g_proctex.empty() || !tex ) return false;
+	auto it = g_proctex.find( tex->GetGLIndex() );
+	if ( it == g_proctex.end() ) return false;
+	proctex_t &p = it->second;
+	if ( p.written ) return true;
+	GLuint w = tex->GetWidth(), h = tex->GetHeight();
+	if ( !w || !h || !tex->GetD3DTexture() ) return false; // not created yet: let the game create it first
+	std::vector<uint8_t> px( (size_t)w * h * 4 );
+	for ( size_t i = 0; i < (size_t)w * h; i++ )
+	{
+		px[i * 4 + 0] = (uint8_t)( p.color >> 16 );
+		px[i * 4 + 1] = (uint8_t)( p.color >> 8 );
+		px[i * 4 + 2] = (uint8_t)( p.color );
+		px[i * 4 + 3] = 255;
+	}
+	if ( FAILED( tex->FillTextureSubLevel( 0, 0, 0, 0, 0, w, h, 1, GL_RGBA, GL_UNSIGNED_BYTE, px.data() ) ) ) return false;
+	tex->CheckMipmapAutogen();
+	D3DTexDump_Level0( tex );
+	p.written = true;
+	unsigned long long hash = 0;
+	const char *fmt = "?";
+	if ( D3DTexDump_Hash( tex, &hash, &fmt ) )
+		logPrintf( "ProcTex: '%s' frozen (%ux%u %s, color %06X), Remix texture hash 0x%016llX\n", p.name.c_str(), w, h, fmt, p.color, hash );
+	else
+		logPrintf( "ProcTex: '%s' frozen (%ux%u, color %06X)\n", p.name.c_str(), w, h, p.color );
+	return true;
+}
+
 static void D3DTex_LoadImage(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels)
 {
 	int targetIndex = UTIL_GLTextureTargettoInternalIndex( target );
@@ -795,6 +884,8 @@ static void D3DTex_LoadImage(GLenum target, GLint level, GLint internalformat, G
 	int currentTMU = D3DState.TextureState.currentTMU;
 	D3DTextureObject *pTexture = D3DState.TextureState.currentTexture[currentTMU][targetIndex];
 	assert(pTexture != nullptr);
+	if ( pixels && targetIndex == D3D_TEXTARGET_2D && proctex_intercept( pTexture ) )
+		return;
 
 	if ( level == 0 ) 
 	{
@@ -906,6 +997,8 @@ static void D3DTex_LoadSubImage(GLenum target, GLint level, GLint xoffset, GLint
 	int currentTMU = D3DState.TextureState.currentTMU;
 	assert(D3DState.TextureState.currentTexture[currentTMU][targetIndex] != nullptr);
 	assert(D3DState.TextureState.currentTexture[currentTMU][targetIndex]->GetD3DTexture() != nullptr);
+	if ( pixels && targetIndex == D3D_TEXTARGET_2D && proctex_intercept( D3DState.TextureState.currentTexture[currentTMU][targetIndex] ) )
+		return;
 
 	if (pixels)
 	{
