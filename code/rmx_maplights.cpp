@@ -66,6 +66,7 @@ static ULONGLONG g_load_tick = 0;
 struct maplights_params_t
 {
 	float scale, exponent, ref, radius, sun_scale;
+	float dlight_scale, dlight_radius;
 };
 
 static maplights_params_t maplights_read_params()
@@ -77,8 +78,93 @@ static maplights_params_t maplights_read_params()
 	p.ref = qdx_readmapconfflt( "maplights", "ref", 300.0f );
 	p.radius = qdx_readmapconfflt( "maplights", "radius", 4.0f );
 	p.sun_scale = qdx_readmapconfflt( "maplights", "sun_scale", 1.0f );
+	p.dlight_scale = qdx_readmapconfflt( "maplights", "dlight_scale", 1.0f );
+	p.dlight_radius = qdx_readmapconfflt( "maplights", "dlight_radius", 4.0f );
 	if ( p.ref <= 0.0f ) p.ref = 300.0f;
 	return p;
+}
+
+static maplights_params_t g_prm = { 1.0f, 2.0f, 300.0f, 4.0f, 1.0f, 1.0f, 4.0f };
+
+// Dynamic lights (muzzle flashes, explosions, spells) from Anachronox's refdef_t, read in the R_RenderView hook.
+// Anachronox extends Quake 2's refdef_t (0xc4 bytes) but keeps the order num_entities, entities, num_dlights,
+// dlights at +0x6c, +0x70, +0x74, +0x78. dlights is an array of Quake 2 dlight_t (origin, color, intensity =
+// reach in game units): in ref_gl.dll R_LightPoint and R_RenderDlights walk it with a 0x1c stride and read the
+// color at +0xc and the intensity at +0x18.
+#define DLIGHTS_MAX 64
+#define REFDEF_NUM_DLIGHTS 0x74
+#define REFDEF_DLIGHTS 0x78
+struct q2dlight_t
+{
+	float origin[3];
+	float color[3];
+	float intensity;
+};
+static q2dlight_t g_dl[DLIGHTS_MAX];
+static int g_dl_count = 0;
+static remixapi_LightHandle g_dl_handles[DLIGHTS_MAX];
+static int g_dl_handle_count = 0;
+static int g_dl_logged = 0;
+
+void qdx_dlights_capture( const void *refdef )
+{
+	const BYTE *b = (const BYTE *)refdef;
+	if ( !b || IsBadReadPtr( b, REFDEF_DLIGHTS + 4 ) ) return;
+	int n = *(const int *)( b + REFDEF_NUM_DLIGHTS );
+	const q2dlight_t *dl = *(const q2dlight_t * const *)( b + REFDEF_DLIGHTS );
+	static int calls = 0;
+	if ( calls++ == 300 ) // a few seconds in: check the layout (vieworg is at +0x18 like in Quake 2)
+		logPrintf( "DLights: R_RenderView refdef vieworg %.0f %.0f %.0f num_dlights %d dlights %p\n",
+			( (const float *)b )[6], ( (const float *)b )[7], ( (const float *)b )[8], n, dl );
+	if ( n <= 0 || !dl ) return;
+	if ( n > DLIGHTS_MAX ) n = DLIGHTS_MAX;
+	if ( IsBadReadPtr( dl, n * sizeof( q2dlight_t ) ) ) return;
+	if ( n < g_dl_count ) return; // several views per frame: keep the one with the most lights
+	memcpy( g_dl, dl, n * sizeof( q2dlight_t ) );
+	g_dl_count = n;
+	if ( g_dl_logged < 5 )
+	{
+		g_dl_logged++;
+		logPrintf( "DLights: %d lights, first at %.0f %.0f %.0f color %.2f %.2f %.2f intensity %.0f\n", n,
+			dl[0].origin[0], dl[0].origin[1], dl[0].origin[2], dl[0].color[0], dl[0].color[1], dl[0].color[2], dl[0].intensity );
+	}
+}
+
+// per frame: replace last frame's Remix lights with the lights captured this frame
+static void dlights_draw()
+{
+	for ( int i = 0; i < g_dl_handle_count; i++ )
+		remixInterface.DestroyLight( g_dl_handles[i] );
+	g_dl_handle_count = 0;
+	for ( int i = 0; i < g_dl_count && g_prm.dlight_scale > 0.0f; i++ )
+	{
+		const q2dlight_t &d = g_dl[i];
+		if ( !( d.intensity > 0.0f ) ) continue; // Quake 2 also has negative "dark" lights
+		float inten = g_prm.dlight_scale * g_prm.ref * powf( d.intensity / g_prm.ref, g_prm.exponent );
+
+		remixapi_LightInfoSphereEXT sphere;
+		ZeroMemory( &sphere, sizeof( sphere ) );
+		sphere.sType = REMIXAPI_STRUCT_TYPE_LIGHT_INFO_SPHERE_EXT;
+		sphere.position.x = d.origin[0];
+		sphere.position.y = d.origin[1];
+		sphere.position.z = d.origin[2];
+		sphere.radius = g_prm.dlight_radius;
+		remixapi_LightInfo info;
+		ZeroMemory( &info, sizeof( info ) );
+		info.sType = REMIXAPI_STRUCT_TYPE_LIGHT_INFO;
+		info.pNext = &sphere;
+		info.hash = 0x444C000000000000ull | (uint64_t)i; // "DL" + slot
+		info.radiance.x = ( d.color[0] > 0.0f ? d.color[0] : 0.0f ) * inten;
+		info.radiance.y = ( d.color[1] > 0.0f ? d.color[1] : 0.0f ) * inten;
+		info.radiance.z = ( d.color[2] > 0.0f ? d.color[2] : 0.0f ) * inten;
+		remixapi_LightHandle h = 0;
+		if ( remixInterface.CreateLight( &info, &h ) == REMIXAPI_ERROR_CODE_SUCCESS && h )
+		{
+			remixInterface.DrawLightInstance( h );
+			g_dl_handles[g_dl_handle_count++] = h;
+		}
+	}
+	g_dl_count = 0;
 }
 
 // files watched for hot reload: the map's .lights file and <game>_customise.ini
@@ -196,7 +282,7 @@ static void maplights_load()
 		return;
 	}
 
-	maplights_params_t prm = maplights_read_params();
+	maplights_params_t prm = g_prm;
 	float scale = prm.scale;
 	char line[512];
 	int lineno = 0, bad = 0, animated = 0;
@@ -381,12 +467,14 @@ void qdx_maplights_draw()
 		{
 			// per-map Remix variables ([rtxconf.default] / [rtxconf.<map>]) and the map's ini sections
 			qdx_begin_loading_map( g_mapname );
+			g_prm = maplights_read_params();
 			if ( D3DGlobal.settings.game.mapLights )
 				maplights_load();
 			else
 				maplights_watch( std::string() );
 		}
 	}
+	dlights_draw();
 	if ( !D3DGlobal.settings.game.mapLights )
 		return;
 
