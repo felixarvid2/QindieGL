@@ -92,13 +92,12 @@ anoxrtx tools (`tools/`): `install.sh`/`install.py` (whole setup from the user's
 - Texture hashes: Remix hash = XXH3_64 of mip 0 in D3D format (BGRA, alpha 255 without alpha). The texture pack
   changes level texture hashes; the mod's hand-made materials are remapped with `rehash_textures.py`.
 
-## In progress when this was written
-- **Fog (idea from the second research round):** the game's GL fog reaches Remix. `rtx.enableFog` alone does
-  almost nothing; adding `rtx.volumetrics.enableFogRemap = True` and `rtx.volumetrics.enableFogColorRemap = True`
-  gives the original teal haze in `bricksb` (screenshots `tools/shots/fog_bricksb_{1,2,3}.png`). A comparison on
-  rowdys, whitecaves-b (densest fog, 0.0025) and sunstrip was running (`fog_<map>_{1,2}.png`, 1 = without remap,
-  2 = with). Next: check that rowdys/whitecaves are not too dense, tune `rtx.volumetrics.fogRemap*` bounds if
-  needed, add the two lines to anoxrtx `rtx.conf`, README note, PR + merge.
+## Fog (done after the first version of this file)
+The game's GL fog reaches Remix, but `rtx.enableFog` alone shows almost nothing. `rtx.volumetrics.enableFogRemap`
+and `enableFogColorRemap` are now on in `rtx.conf` and in `[rtxconf.default]` of `anox_customise.ini` (so a map can
+turn them off). Tested: bricksb gets the original teal haze, sunstrip a light haze, the alley at the start of
+`+map rowdys` gets a grey milky haze (flatter; owner to judge). whitecaves-b (densest fog) hangs on "One moment"
+when started with `+map`, so it is untested. Tuning knobs: `rtx.volumetrics.fogRemap*` bounds.
 
 ## Not yet verified in the game
 - Lava freeze (`proctex`): look in Levant for "ProcTex: ... frozen ..., Remix texture hash 0x561447B2DFA181FD"
