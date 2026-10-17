@@ -55,9 +55,14 @@ For Codex work, use this model split requested by Felix:
 | Work | Model |
 | --- | --- |
 | Read-only summaries of selected logs, documentation comparisons, fact extraction from supplied excerpts | Gemini `gemini-3.1-flash-lite` through the local `gemini-triage` skill |
-| Repository exploration with tools and exact mechanical edits | GPT-6 Luna |
-| Implementation, code review, and most debugging | GPT-6.1 Sol |
-| Exceptionally hard investigations where Sol's work establishes a need | GPT-6 Astra |
+| Routine exploration, validation orchestration, documentation, and exact mechanical edits | GPT-6 Luna |
+| Substantial implementation, difficult debugging, and focused final review when needed | GPT-6.1 Sol |
+| Disabled for this project unless Felix explicitly changes this preference | GPT-6 Astra |
+
+After usage-limit feedback on 2026-10-17, prefer Gemini and Luna for bounded
+work before escalating a concrete unresolved question to Sol. Keep returns
+concise and evidence-based. Reuse verified results when inputs are unchanged;
+repeat broad captures or reviews only when a new change or failure warrants it.
 
 Gemini is an external API helper, not a native Codex subagent. It receives only
 explicitly selected public project excerpts or sanitized logs, has no tools or
