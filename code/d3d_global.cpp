@@ -35,6 +35,7 @@
 #include "rmx_gen.h"
 #include "rmx_light.h"
 #include "rmx_maplights.h"
+extern "C" const char *g_remix_api_layout = "offline";
 #include "resource.h"
 
 #include <tchar.h>
@@ -954,6 +955,7 @@ static BOOL D3DGlobal_InitializeDirect3D( void )
 				remixInterface.SetCameraMediumMaterial = (PFN_remixapi_SetCameraMediumMaterial)fn[19];
 			}
 			logPrintf( "Remix API: %s function layout\n", plusLayout ? "Remix Plus" : "upstream" );
+			g_remix_api_layout = plusLayout ? "Remix Plus" : "upstream";
 			if ( status != REMIXAPI_ERROR_CODE_SUCCESS ) {
 				logPrintf( "Warn: Remix API init error %d, did you set 'exposeRemixApi = True' in .trex\\bridge.conf ? \n", status );
 			}

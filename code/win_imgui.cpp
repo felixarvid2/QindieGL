@@ -1,6 +1,9 @@
 
 #include "windows.h"
 #include "rmx_gen.h"
+#ifndef QINDIEGLSRC_NO_REMIX
+#include "rmx_maplights.h"
+#endif
 #include "imgui.h"
 #include "backends/imgui_impl_dx9.h"
 #include "backends/imgui_impl_win32.h"
@@ -14,6 +17,7 @@
 #include "d3d_matrix_detection.hpp"
 //#include "camera_search.h"
 #include <string>
+#include <string.h>
 
 #define GVAR_SHOW_IMGUI "rmx_show_imgui"
 
@@ -50,8 +54,84 @@ static void exchange_wndproc_and_mouse( enum exc_wprocnmouse_e action );
 #pragma warning( push )
 #pragma warning( disable : 4305)
 
+// The Anachronox panel only reads a render-thread snapshot. Generic editing
+// controls below remain available to the other supported games.
+static void do_draw_anox()
+{
+	ImGui::SetNextWindowSize(ImVec2(680, 620), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowBgAlpha(1.0f);
+	bool open = true;
+	if (ImGui::Begin("Anachronox diagnostics", &open))
+	{
+		if (ImGui::Button("Play!"))
+			exchange_wndproc_and_mouse(WNDPROC_RESTORE_GAME);
+		ImGui::SameLine();
+		if (ImGui::Button("Close"))
+			open = false;
+		ImGui::SameLine();
+		ImGui::TextUnformatted("Alt+C toggles this panel");
+#ifndef QINDIEGLSRC_NO_REMIX
+		qdx_anox_diagnostics_t d = {};
+		qdx_anox_get_diagnostics(&d);
+		ImGui::SeparatorText("Scene and lifecycle");
+		ImGui::Text("Map: %s", d.map_name[0] ? d.map_name : "(none)");
+		ImGui::Text("Camera: %s  %.1f %.1f %.1f", d.camera_valid ? "valid" : "unavailable",
+			d.camera[0], d.camera[1], d.camera[2]);
+		ImGui::TextWrapped("Config: %s", d.config_file[0] ? d.config_file : "(none)");
+		ImGui::Text("Reload: %s   Pending frames: %d", d.reload_reason, d.pending_frames);
+		ImGui::Text("Remix API: %s   Layout: %s   Device generation: %lu",
+			d.api_online ? "online" : "offline", d.api_layout, d.device_generation);
+		ImGui::SeparatorText("Map lights");
+		ImGui::Text("Scale %.3f   Exponent %.3f   Reference %.3f", d.scale, d.exponent, d.ref);
+		ImGui::Text("Radius %.3f   Sun scale %.3f", d.radius, d.sun_scale);
+		ImGui::Text("Loaded: %lu   Live: %lu   Animated: %lu   Switched: %lu",
+			d.static_lights, d.live_static_lights, d.animated_lights, d.switched_lights);
+		ImGui::Text("Last load create: attempted %lu   OK %lu   Failed %lu   First error %d",
+			d.create_attempted, d.create_success, d.create_failed, d.create_first_error);
+		ImGui::Text("Current frame draw: attempted %lu   OK %lu   Failed %lu   First error %d",
+			d.frame_draw_attempted, d.frame_draw_success, d.frame_draw_failed, d.frame_draw_first_error);
+		ImGui::Text("Dynamic lights: captured %lu   Live %lu", d.dynamic_captured, d.dynamic_live);
+		ImGui::SeparatorText("Game events");
+		ImGui::Text("Event lights: %s   Game styles: %s   Game time: %.3f",
+			d.event_lights_enabled ? "enabled" : "disabled",
+			d.game_styles_valid ? "valid" : "unavailable", d.game_time);
+		ImGui::Text("Style updates: %lu   Style create failures: %lu", d.style_updates, d.style_create_failed);
+		if (ImGui::CollapsingHeader("Used light styles (0-63): RGB", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			bool any = false;
+			for (int i = 0; i < 64; ++i)
+			{
+				if (!d.style_used[i]) continue;
+				any = true;
+				ImGui::Text("%2d   %.3f %.3f %.3f", i,
+					d.style_rgb[i][0], d.style_rgb[i][1], d.style_rgb[i][2]);
+			}
+			if (!any) ImGui::TextUnformatted("No styles used by loaded lights.");
+		}
+#else
+		ImGui::TextUnformatted("Remix diagnostics are unavailable in this build.");
+#endif
+		ImGui::Separator();
+		ImGui::Text("App average %.3f ms/frame (%.1f FPS)",
+			io->Framerate > 0 ? 1000.0f / io->Framerate : 0.0f, io->Framerate);
+	}
+	ImGui::End();
+	if (!open)
+	{
+		g_visible = FALSE;
+		exchange_wndproc_and_mouse(WNDPROC_RESTORE_GAME);
+	}
+}
+
 static void do_draw()
 {
+	const char *game_name = D3DGlobal_GetGameName();
+	if (game_name && strcmp(game_name, "game.anox") == 0)
+	{
+		do_draw_anox();
+		return;
+	}
 	static float f = 0.0f;
 	static int counter = 0;
 	static bool no_background = 1;
@@ -758,26 +838,25 @@ void qdx_imgui_init(void *hwnd, void *device)
 
 void qdx_imgui_deinit()
 {
-	if ( g_initialised )
+	if (g_initialised)
 	{
-		g_initialised = FALSE;
-		g_hwnd = NULL;
-		g_device = NULL;
-
-		if ( g_visible )
-		{
-			g_visible = FALSE;
-			exchange_wndproc_and_mouse(WNDPROC_RESTORE_GAME);
-		}
-
+		// Restore the original procedure while its window and ImGui IO still exist.
+		g_visible = FALSE;
+		exchange_wndproc_and_mouse(WNDPROC_RESTORE_GAME);
 		ImGui_ImplDX9_Shutdown();
 		ImGui_ImplWin32_Shutdown();
 		ImGui::DestroyContext();
+		io = NULL;
+		g_device = NULL;
+		g_hwnd = NULL;
+		g_initialised = FALSE;
 	}
 }
 
 void qdx_imgui_draw()
 {
+	if (!g_initialised || !io || !g_hwnd || !g_device)
+		return;
 	if ( g_use_shortcut_keys )
 	{
 		keys = keypress_get();
@@ -855,11 +934,15 @@ void qdx_imgui_draw()
 
 static LRESULT CALLBACK wnd_proc_hk(HWND hWnd, UINT message_type, WPARAM wParam, LPARAM lParam)
 {
+	if (!g_initialised || !io)
+		return g_game_wndproc ? CallWindowProc(g_game_wndproc, hWnd, message_type, wParam, lParam)
+			: DefWindowProc(hWnd, message_type, wParam, lParam);
 	bool pass_msg_to_game = false;
 
 	switch (message_type)
 	{
-	case WM_KEYUP: case WM_SYSKEYUP: // always pass button up events to prevent "stuck" game keys
+	case WM_KEYUP: case WM_SYSKEYUP: // release keys held before opening the panel
+	case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP: case WM_XBUTTONUP:
 
 									 // allows user to move the game window via titlebar :>
 	case WM_NCLBUTTONDOWN: case WM_NCLBUTTONUP: case WM_NCMOUSEMOVE: case WM_NCMOUSELEAVE:
@@ -935,7 +1018,11 @@ static void exchange_wndproc_and_mouse( enum exc_wprocnmouse_e action )
 	switch ( action )
 	{
 	case WNDPROC_SET_IMGUI:
+		if (!g_hwnd || !IsWindow(HWND(g_hwnd)) || g_game_wndproc)
+			break;
 		g_game_wndproc = (WNDPROC)(SetWindowLongPtr(HWND(g_hwnd), GWLP_WNDPROC, LONG_PTR(wnd_proc_hk)));
+		if (!g_game_wndproc) break;
+		if (io) io->MouseDrawCursor = true;
 		g_in_mouse_val = rmx_gamevar_get("in_mouse");
 		if ( g_in_mouse_val )
 		{
@@ -945,9 +1032,27 @@ static void exchange_wndproc_and_mouse( enum exc_wprocnmouse_e action )
 		rmx_deactivate_mouse();
 		break;
 	case WNDPROC_RESTORE_GAME:{
-		if( g_game_wndproc )
+		if (g_hwnd && IsWindow(HWND(g_hwnd)) && g_game_wndproc)
 			SetWindowLongPtr( HWND( g_hwnd ), GWLP_WNDPROC, LONG_PTR( g_game_wndproc ) );
 		g_game_wndproc = NULL;
+		if (io && g_hwnd)
+		{
+			// Reset the backend's button mask as well as ImGui IO. Alt+C may
+			// close the panel while a mouse button is still physically held.
+			ImGui_ImplWin32_WndProcHandler(HWND(g_hwnd), WM_LBUTTONUP, 0, 0);
+			ImGui_ImplWin32_WndProcHandler(HWND(g_hwnd), WM_RBUTTONUP, 0, 0);
+			ImGui_ImplWin32_WndProcHandler(HWND(g_hwnd), WM_MBUTTONUP, 0, 0);
+			ImGui_ImplWin32_WndProcHandler(HWND(g_hwnd), WM_XBUTTONUP, MAKEWPARAM(0, XBUTTON1), 0);
+			ImGui_ImplWin32_WndProcHandler(HWND(g_hwnd), WM_XBUTTONUP, MAKEWPARAM(0, XBUTTON2), 0);
+		}
+		if (g_hwnd && GetCapture() == HWND(g_hwnd)) ReleaseCapture();
+		g_mouse_click_new = FALSE;
+		if (io)
+		{
+			io->MouseDrawCursor = false;
+			io->ClearInputKeys();
+			io->ClearInputMouse();
+		}
 		if( g_in_mouse_val )
 		{
 			char value[4] = { 0 };

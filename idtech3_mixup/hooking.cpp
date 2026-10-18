@@ -304,7 +304,10 @@ void hook_do_init(const char *exename, const char* dllname, const char *gamename
 		}
 	}
 
-	if ( D3DGlobal_ReadGameConf( "dlights" ) )
+	// R_RenderView carries the frame's dynamic lights (dlights) and the game's light styles (event lighting
+	// for maplights), so hook it when either is enabled; dynamic lights are only drawn with dlights = 1.
+	qdx_dlights_set_enabled( D3DGlobal_ReadGameConf( "dlights" ) );
+	if ( D3DGlobal_ReadGameConf( "dlights" ) || D3DGlobal_ReadGameConf( "maplights" ) )
 	{
 		HMODULE hrefgl = GetModuleHandleA( "ref_gl.dll" );
 		fp_R_RenderView = hrefgl ? (void (__cdecl*)( void * ))find_r_renderview( hrefgl ) : NULL;
