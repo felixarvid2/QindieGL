@@ -8,10 +8,12 @@ Linux for Wine/Proton. Its Anachronox integration is paired with
 
 Before working, read `CLAUDE.md` and `linux/README.md`. For Anachronox work, also
 read the companion repository's `HANDOFF.md`, `TODO.md`, and relevant README
-sections. `TODO.md` is a backlog, not proof of current implementation status:
-the handoff records later work such as dynamic lights, procedural lava textures,
-Remix Plus compatibility, and working DLSS. Confirm claims against the current
-checkout and runtime evidence before starting or marking work complete.
+sections. Read `STATUS.md` and `ROADMAP.md` for current scope and wrapper responsibilities;
+the companion `PLAN.md` is the canonical ordered plan. Confirm claims against
+source and dated runtime evidence before marking work complete. Timer styles,
+dlights, static material generators and the generic overlay already exist;
+event synchronization, PVS, dynamic emission and anchors remain extensions.
+Keep model-routing proposals (#23 / anoxrtx #28) separate from feature work.
 
 Check `git status`, the current branch, and `git worktree list` before editing.
 There are several QindieGL worktrees; do not assume this checkout is `master` or
@@ -71,7 +73,10 @@ source references before acting. Use local search for simple lookups.
 
 The owner's local helper is
 `~/.codex/skills/gemini-triage/scripts/triage.py`; consult that skill's `SKILL.md`
-for invocation. The credential stays in `~/Documents/gemini-api.md`, outside the
+for invocation. At the 2026-10-18 documentation update, that local skill/helper
+was absent from this environment; check availability before using it and fall
+back to local work when missing. No Gemini request was made for the update.
+The credential stays in `~/Documents/gemini-api.md`, outside the
 repos, and must never appear in prompts, command arguments, URLs, logs, or git.
 Do not upload game assets or private data as context. Free-tier data handling
 follows Google's applicable terms.

@@ -1,6 +1,13 @@
 # QindieGL
 ## QindieGL Is Not Driver, It's Emulator
 
+Current implementation/verification status: [STATUS.md](STATUS.md).
+The [ordered implementation plan](https://github.com/felixarvid2/anoxrtx/blob/main/PLAN.md)
+includes screenshot regression, event lighting, BSP/PVS, dynamic emission,
+PBR classification, anchors, environment transitions and rain/wetness.
+These are planned extensions; implemented foundations and remaining visual
+checks are distinguished in the status table.
+
 > **This is a fork of [whisperglen/QindieGL](https://github.com/whisperglen/QindieGL) by whisperglen**, made to run
 > Anachronox with RTX Remix. It adds:
 > - **Linux support**: a cross-build with llvm-mingw (`linux/`, `CMakeLists.txt`) for use under Wine/Proton

@@ -18,5 +18,6 @@ Subagents live in `.claude/agents/` (copied from felixarvid2/test).
 - Hand `implementer` a clear spec (what, where, how to verify); hand `mechanic` the exact change.
   Run independent pieces in parallel.
 - Keep decisions in the main session and check subagent results (diff + build output) before committing.
-- Nothing is done until the Linux build passes:
+- Follow `STATUS.md` and `ROADMAP.md` for current scope and verification gaps.
+- Code changes require a passing Linux build and the 385-export check in `AGENTS.md`. Documentation-only changes require diff/link review:
   `cmake -S . -B build-linux -DCMAKE_TOOLCHAIN_FILE=linux/toolchain-i686-llvm-mingw.cmake && cmake --build build-linux -j8`
