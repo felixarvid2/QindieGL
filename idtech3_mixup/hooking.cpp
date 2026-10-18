@@ -83,11 +83,58 @@ static void *find_r_renderview( HMODULE mod )
 	return NULL;
 }
 
+// ref_gl.dll R_LightPoint( vec3 p, vec3 color ) (lightmap value under a point, used to light models), by its
+// prologue: push ebp / mov ebp,esp / sub esp,0x34 / mov eax,[r_worldmodel] / cmp [eax+0x1ac],0 (lightdata) /
+// jnz. Its dlight loop compares against r_newrefdef.num_dlights: cmp ecx,[num_dlights] / jge.
+static void *find_r_lightpoint( HMODULE mod, int **num_dlights )
+{
+	static const BYTE sig[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x34, 0xA1 };
+	static const BYTE sig2[] = { 0x83, 0xB8, 0xAC, 0x01, 0x00, 0x00, 0x00, 0x75 };
+	BYTE *base = (BYTE *)mod;
+	IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)( base + ( (IMAGE_DOS_HEADER *)base )->e_lfanew );
+	IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION( nt );
+	for ( int i = 0; i < nt->FileHeader.NumberOfSections; i++ )
+	{
+		if ( !( sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE ) ) continue;
+		BYTE *p = base + sec[i].VirtualAddress;
+		DWORD n = sec[i].Misc.VirtualSize;
+		for ( DWORD j = 0; j + 0x200 <= n; j++ )
+		{
+			if ( memcmp( p + j, sig, sizeof( sig ) ) || memcmp( p + j + 11, sig2, sizeof( sig2 ) ) ) continue;
+			for ( DWORD k = j + 0x40; k < j + 0x200; k++ )
+				if ( p[k] == 0x3B && p[k + 1] == 0x0D && p[k + 6] == 0x0F && p[k + 7] == 0x8D )
+				{
+					*num_dlights = *(int **)( p + k + 2 );
+					return p + j;
+				}
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
+// In R_RenderView, after the call that returns the world's light info: fld [ecx+0x30] / fstp [model_light_color]
+// ... push 0 / push 0 / push model_light_offset (the transformed light direction).
+static bool find_model_light( BYTE *rv, float **color, float **offset )
+{
+	*color = *offset = NULL;
+	for ( int k = 0; k < 0x600 && !*offset; k++ )
+	{
+		if ( !*color && rv[k] == 0xD9 && rv[k + 1] == 0x41 && rv[k + 2] == 0x30 && rv[k + 3] == 0xD9 && rv[k + 4] == 0x1D )
+			*color = *(float **)( rv + k + 5 );
+		else if ( *color && rv[k] == 0x6A && rv[k + 1] == 0 && rv[k + 2] == 0x6A && rv[k + 3] == 0 && rv[k + 4] == 0x68 )
+			*offset = *(float **)( rv + k + 5 );
+	}
+	return *color && *offset;
+}
+
 static void (__cdecl *fp_R_RenderView)( void * ) = NULL;
 static void __cdecl hk_R_RenderView( void *fd )
 {
 	qdx_dlights_capture( fd );
-	fp_R_RenderView( qdx_rigcam_apply( fd ) ); // test rig camera override (rtx-remix/rigcam.txt), else fd
+	void *view = qdx_rigcam_apply( fd ); // test rig camera override (rtx-remix/rigcam.txt), else fd
+	fp_R_RenderView( view );
+	qdx_modelfill_capture( view ); // after the view: the world model and light styles are this frame's
 }
 
 // Anachronox anoxgfx.dll texture manager (option proctex): TEX_BindTexture( mgr, handle ) binds the GL texture
@@ -318,6 +365,22 @@ void hook_do_init(const char *exename, const char* dllname, const char *gamename
 		else
 		{
 			logPrintf( "DLights: R_RenderView at ref_gl.dll+0x%x\n", (unsigned)( (BYTE *)fp_R_RenderView - (BYTE *)hrefgl ) );
+			int *num_dlights = NULL;
+			void *lp = find_r_lightpoint( hrefgl, &num_dlights );
+			if ( lp )
+			{
+				logPrintf( "ModelFill: R_LightPoint at ref_gl.dll+0x%x\n", (unsigned)( (BYTE *)lp - (BYTE *)hrefgl ) );
+				qdx_modelfill_init( (void (__cdecl *)( const float *, float * ))lp, num_dlights );
+				float *mlc, *mlo;
+				if ( find_model_light( (BYTE *)fp_R_RenderView, &mlc, &mlo ) )
+				{
+					logPrintf( "ModelFill: model light at ref_gl.dll+0x%x / +0x%x\n", (unsigned)( (BYTE *)mlc - (BYTE *)hrefgl ),
+						(unsigned)( (BYTE *)mlo - (BYTE *)hrefgl ) );
+					qdx_modelfill_set_model_light( mlc, mlo );
+				}
+			}
+			else
+				logPrintf( "ModelFill: ref_gl.dll R_LightPoint not found, model_fill disabled\n" );
 			DetourTransactionBegin();
 			DetourUpdateThread( GetCurrentThread() );
 			error = DetourAttach( &(PVOID&)fp_R_RenderView, (PVOID)hk_R_RenderView );

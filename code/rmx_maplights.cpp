@@ -210,6 +210,8 @@ void qdx_dlights_capture( const void *refdef )
 	}
 }
 
+static uint64_t g_frame_light_serial = 0; // dlights and model fill lights
+
 // per frame: replace last frame's Remix lights with the lights captured this frame
 static void dlights_draw()
 {
@@ -233,7 +235,8 @@ static void dlights_draw()
 		ZeroMemory( &info, sizeof( info ) );
 		info.sType = REMIXAPI_STRUCT_TYPE_LIGHT_INFO;
 		info.pNext = &sphere;
-		info.hash = 0x444C000000000000ull | (uint64_t)i; // "DL" + slot
+		info.hash = 0x444C000000000000ull | ( ++g_frame_light_serial & 0x0000FFFFFFFFFFFFull ); // "DL": a fresh identity
+		// per creation, Remix Plus defers destruction and drops a new light that reuses a pending hash
 		info.radiance.x = ( d.color[0] > 0.0f ? d.color[0] : 0.0f ) * inten;
 		info.radiance.y = ( d.color[1] > 0.0f ? d.color[1] : 0.0f ) * inten;
 		info.radiance.z = ( d.color[2] > 0.0f ? d.color[2] : 0.0f ) * inten;
@@ -246,6 +249,128 @@ static void dlights_draw()
 	}
 	g_dl_last_captured = (unsigned long)g_dl_count;
 	g_dl_count = 0;
+}
+
+// ---- model fill lights ----
+// Anachronox entity_t (from ref_gl.dll R_DrawEntitiesOnList / R_LightPoint): 0x1b0 bytes, origin at +0x64,
+// renderfx at +0x174 (0x2000: not drawn), model_t * at +0x184; model type at model +0x104 (R_DrawEntitiesOnList:
+// 1 brush, 6 character/prop models, lit with R_LightPoint).
+#define REFDEF_NUM_ENTITIES 0x6c
+#define REFDEF_ENTITIES 0x70
+#define ENTITY_SIZE 0x1b0
+#define ENTITY_ORIGIN 0x64
+#define ENTITY_RENDERFX 0x174
+#define ENTITY_MODEL 0x184
+#define MODEL_TYPE 0x104
+#define MODELFILL_MAX 32
+struct modelfill_t
+{
+	float pos[3];
+	float color[3];
+};
+static void ( __cdecl *g_light_point )( const float *, float * ) = NULL;
+static int *g_lp_num_dlights = NULL;
+static modelfill_t g_mf[MODELFILL_MAX];
+static int g_mf_count = 0;
+static remixapi_LightHandle g_mf_handles[MODELFILL_MAX];
+static int g_mf_handle_count = 0;
+static float g_mf_scale = 0.0f, g_mf_radius = 6.0f, g_mf_distance = 40.0f, g_mf_height = 16.0f, g_mf_range = 1500.0f, g_mf_model_light = 1.0f;
+static int g_mf_logged = 0;
+
+static const float *g_ml_color = NULL, *g_ml_offset = NULL;
+void qdx_modelfill_set_model_light( const float *color, const float *offset )
+{
+	g_ml_color = color;
+	g_ml_offset = offset;
+}
+
+void qdx_modelfill_init( void ( __cdecl *light_point )( const float *, float * ), int *num_dlights )
+{
+	g_light_point = light_point;
+	g_lp_num_dlights = num_dlights;
+}
+
+void qdx_modelfill_capture( const void *refdef )
+{
+	const BYTE *b = (const BYTE *)refdef;
+	if ( !g_light_point || !g_lp_num_dlights || !( g_mf_scale > 0.0f ) || !b || IsBadReadPtr( b, REFDEF_NUM_DLIGHTS ) )
+		return;
+	const float *ls = *(const float * const *)( b + REFDEF_LIGHTSTYLES ); // world views only, as the rig camera
+	if ( !ls || IsBadReadPtr( ls, 16 ) || !( ls[0] > 0.9f && ls[0] < 1.1f ) ) return;
+	int n = *(const int *)( b + REFDEF_NUM_ENTITIES );
+	const BYTE *ents = *(const BYTE * const *)( b + REFDEF_ENTITIES );
+	if ( n <= 0 || !ents || n > 4096 || IsBadReadPtr( ents, (size_t)n * ENTITY_SIZE ) ) return;
+	const float *view = (const float *)( b + 0x18 );
+	const float *ml = g_ml_color && !IsBadReadPtr( g_ml_color, 12 ) ? g_ml_color : NULL;
+	int saved = *g_lp_num_dlights;
+	*g_lp_num_dlights = 0;
+	g_mf_count = 0;
+	for ( int i = 0; i < n && g_mf_count < MODELFILL_MAX; i++ )
+	{
+		const BYTE *e = ents + (size_t)i * ENTITY_SIZE;
+		const BYTE *model = *(const BYTE * const *)( e + ENTITY_MODEL );
+		if ( !model || IsBadReadPtr( model + MODEL_TYPE, 4 ) ) continue;
+		int type = *(const int *)( model + MODEL_TYPE );
+		if ( type != 6 || ( *(const unsigned *)( e + ENTITY_RENDERFX ) & 0x2000 ) ) continue;
+		const float *o = (const float *)( e + ENTITY_ORIGIN );
+		float d[3] = { view[0] - o[0], view[1] - o[1], 0.0f };
+		float len = sqrtf( d[0] * d[0] + d[1] * d[1] );
+		if ( len > g_mf_range ) continue;
+		float c[3] = { 1.0f, 1.0f, 1.0f };
+		g_light_point( o, c );
+		if ( ml )
+			for ( int j = 0; j < 3; j++ ) c[j] += ml[j] * g_mf_model_light;
+		modelfill_t &m = g_mf[g_mf_count++];
+		// between the model and the camera, so the light reaches the side the camera sees
+		float k = len > 1.0f ? g_mf_distance / len : 0.0f;
+		m.pos[0] = o[0] + d[0] * k;
+		m.pos[1] = o[1] + d[1] * k;
+		m.pos[2] = o[2] + g_mf_height;
+		memcpy( m.color, c, sizeof( c ) );
+		if ( g_mf_logged < 5 )
+		{
+			g_mf_logged++;
+			logPrintf( "ModelFill: entity %d type %d at %.0f %.0f %.0f, light point + model light %.2f %.2f %.2f\n", i, type, o[0], o[1], o[2], c[0], c[1], c[2] );
+		}
+	}
+	*g_lp_num_dlights = saved;
+}
+
+static void modelfill_draw()
+{
+	for ( int i = 0; i < g_mf_handle_count; i++ )
+		remixInterface.DestroyLight( g_mf_handles[i] );
+	g_mf_handle_count = 0;
+	for ( int i = 0; i < g_mf_count && g_mf_scale > 0.0f; i++ )
+	{
+		const modelfill_t &m = g_mf[i];
+		remixapi_LightInfoSphereEXT sphere;
+		ZeroMemory( &sphere, sizeof( sphere ) );
+		sphere.sType = REMIXAPI_STRUCT_TYPE_LIGHT_INFO_SPHERE_EXT;
+		sphere.position.x = m.pos[0];
+		sphere.position.y = m.pos[1];
+		sphere.position.z = m.pos[2];
+		sphere.radius = g_mf_radius;
+		remixapi_LightInfo info;
+		ZeroMemory( &info, sizeof( info ) );
+		info.sType = REMIXAPI_STRUCT_TYPE_LIGHT_INFO;
+		info.pNext = &sphere;
+		info.hash = 0x4D46000000000000ull | ( ++g_frame_light_serial & 0x0000FFFFFFFFFFFFull ); // "MF", fresh as "DL"
+		info.radiance.x = m.color[0] * g_mf_scale;
+		info.radiance.y = m.color[1] * g_mf_scale;
+		info.radiance.z = m.color[2] * g_mf_scale;
+		remixapi_LightHandle h = 0;
+		remixapi_ErrorCode rc = remixInterface.CreateLight( &info, &h );
+		if ( rc == REMIXAPI_ERROR_CODE_SUCCESS && h )
+		{
+			rc = remixInterface.DrawLightInstance( h );
+			g_mf_handles[g_mf_handle_count++] = h;
+		}
+		static int logged = 0;
+		if ( logged < 3 && ( ++logged ) )
+			logPrintf( "ModelFill: light %d at %.0f %.0f %.0f radiance %.1f %.1f %.1f, result %d\n", i, m.pos[0], m.pos[1], m.pos[2],
+				info.radiance.x, info.radiance.y, info.radiance.z, (int)rc );
+	}
 }
 
 // files watched for hot reload: the map's .lights file and <game>_customise.ini
@@ -344,10 +469,13 @@ void qdx_maplights_device_lost()
 		maplights_destroy();
 		for ( int i = 0; i < g_dl_handle_count; i++ )
 			remixInterface.DestroyLight( g_dl_handles[i] );
+		for ( int i = 0; i < g_mf_handle_count; i++ )
+			remixInterface.DestroyLight( g_mf_handles[i] );
 	}
 	else
 		g_lights.clear();
 	g_dl_handle_count = g_dl_count = 0;
+	g_mf_handle_count = g_mf_count = 0;
 	g_have_viewpos = false;
 	g_draw_frames = 120;
 	g_draw_summary_pending = false;
@@ -831,6 +959,14 @@ void qdx_maplights_draw()
 			qdx_begin_loading_map( g_mapname );
 			g_prm = maplights_read_params();
 			g_event_lights = qdx_readmapconfflt( "maplights", "event_lights", 1.0f ) != 0.0f;
+			g_mf_scale = qdx_readmapconfflt( "maplights", "model_fill", 0.0f );
+			g_mf_radius = qdx_readmapconfflt( "maplights", "model_fill_radius", 6.0f );
+			g_mf_distance = qdx_readmapconfflt( "maplights", "model_fill_distance", 40.0f );
+			g_mf_height = qdx_readmapconfflt( "maplights", "model_fill_height", 16.0f );
+			g_mf_model_light = qdx_readmapconfflt( "maplights", "model_fill_model_light", 1.0f );
+			if ( g_mf_scale > 0.0f )
+				logPrintf( "ModelFill: scale %g radius %g distance %g height %g%s\n", g_mf_scale, g_mf_radius, g_mf_distance,
+					g_mf_height, g_light_point ? "" : " (R_LightPoint not found: off)" );
 			if ( D3DGlobal.settings.game.mapLights )
 				maplights_load();
 			else
@@ -838,6 +974,7 @@ void qdx_maplights_draw()
 		}
 	}
 	dlights_draw();
+	modelfill_draw();
 	if ( !D3DGlobal.settings.game.mapLights )
 		return;
 
