@@ -63,6 +63,8 @@ public:
 	GLuint GetWidth() const { return m_width; }
 	GLuint GetHeight() const { return m_height; }
 	GLuint GetDepth() const { return m_depth; }
+	D3DFORMAT GetD3DFormat() const { return m_format; }
+	GLboolean GetMipmaps() const { return m_mipmaps; }
 	GLfloat GetLodBias() const { return m_lodBias; }
 	GLuint GetGLIndex() const { return m_glIndex; }
 	eTexTypeInternal GetInternalFormat() const { return m_internalFormat; }
