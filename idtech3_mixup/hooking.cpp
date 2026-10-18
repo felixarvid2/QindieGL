@@ -87,7 +87,7 @@ static void (__cdecl *fp_R_RenderView)( void * ) = NULL;
 static void __cdecl hk_R_RenderView( void *fd )
 {
 	qdx_dlights_capture( fd );
-	fp_R_RenderView( fd );
+	fp_R_RenderView( qdx_rigcam_apply( fd ) ); // test rig camera override (rtx-remix/rigcam.txt), else fd
 }
 
 // Anachronox anoxgfx.dll texture manager (option proctex): TEX_BindTexture( mgr, handle ) binds the GL texture

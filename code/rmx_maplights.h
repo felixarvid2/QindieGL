@@ -38,6 +38,9 @@ void qdx_maplights_device_ready();
 // Called from the ref_gl.dll R_RenderView hook (game thread): copies the frame's dynamic lights
 // (muzzle flashes, explosions, spells) from Anachronox's refdef_t; drawn as Remix lights by qdx_maplights_draw().
 void qdx_dlights_capture( const void *refdef );
+// Test rig camera: when <game>/rtx-remix/rigcam.txt holds "x y z pitch yaw [roll]", world views are rendered
+// from there (a modified copy of the refdef is returned; the game's own state is untouched). Otherwise refdef.
+void *qdx_rigcam_apply( void *refdef );
 // Whether captured dynamic lights are drawn (QindieGL.ini dlights); light styles are captured regardless.
 void qdx_dlights_set_enabled( int enabled );
 
