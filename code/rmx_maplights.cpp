@@ -732,8 +732,74 @@ static void maplights_load()
 		logPrintf( "MapLights: scale %g sun_scale %g\n", prm.scale, prm.sun_scale );
 }
 
+// ---- test rig camera (see rmx_maplights.h) ----
+#define REFDEF_SIZE 0xc4
+#define REFDEF_VIEWORG 0x18
+#define REFDEF_VIEWANGLES 0x24
+static BYTE g_rigcam_refdef[REFDEF_SIZE];
+static float g_rigcam[6];
+static bool g_rigcam_on = false;
+static FILETIME g_rigcam_time = { 0, 0 };
+static ULONGLONG g_rigcam_tick = 0;
+
+static void rigcam_poll()
+{
+	ULONGLONG now = GetTickCount64();
+	if ( now - g_rigcam_tick < 250 ) return;
+	g_rigcam_tick = now;
+	std::string file = maplights_game_dir() + "\\rtx-remix\\rigcam.txt";
+	FILETIME t = maplights_mtime( file );
+	if ( CompareFileTime( &t, &g_rigcam_time ) == 0 ) return;
+	g_rigcam_time = t;
+	float v[6] = { 0, 0, 0, 0, 0, 0 };
+	int n = 0;
+	FILE *f = ( t.dwLowDateTime || t.dwHighDateTime ) ? fopen( file.c_str(), "r" ) : NULL;
+	if ( f )
+	{
+		n = fscanf( f, "%f %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5] );
+		fclose( f );
+	}
+	bool on = n >= 5;
+	if ( on ) memcpy( g_rigcam, v, sizeof( g_rigcam ) );
+	if ( on || g_rigcam_on )
+		logPrintf( on ? "RigCam: view %.0f %.0f %.0f angles %.1f %.1f %.1f\n" : "RigCam: off\n",
+			v[0], v[1], v[2], v[3], v[4], v[5] );
+	g_rigcam_on = on;
+}
+
+void *qdx_rigcam_apply( void *refdef )
+{
+	rigcam_poll();
+	const BYTE *b = (const BYTE *)refdef;
+	if ( !g_rigcam_on || !b || IsBadReadPtr( b, REFDEF_SIZE ) ) return refdef;
+	// only world views: they carry the light-style array (style 0 ~ 1.0); menu/model views do not
+	const float *ls = *(const float * const *)( b + REFDEF_LIGHTSTYLES );
+	if ( !ls || IsBadReadPtr( ls, 16 ) || !( ls[0] > 0.9f && ls[0] < 1.1f ) ) return refdef;
+	memcpy( g_rigcam_refdef, b, REFDEF_SIZE );
+	memcpy( g_rigcam_refdef + REFDEF_VIEWORG, g_rigcam, 3 * sizeof( float ) );
+	memcpy( g_rigcam_refdef + REFDEF_VIEWANGLES, g_rigcam + 3, 3 * sizeof( float ) );
+	return g_rigcam_refdef;
+}
+
+// ---- frame time log for performance comparisons (tools/anoxcheck.py) ----
+static ULONGLONG g_perf_t0 = 0;
+static unsigned g_perf_frames = 0;
+static void perf_tick()
+{
+	ULONGLONG now = GetTickCount64();
+	if ( !g_perf_t0 ) { g_perf_t0 = now; return; }
+	if ( ++g_perf_frames >= 300 )
+	{
+		logPrintf( "Perf: %.2f ms/frame (%.1f fps) over %u frames, map '%s'%s\n",
+			(double)( now - g_perf_t0 ) / g_perf_frames, 1000.0 * g_perf_frames / (double)( now - g_perf_t0 ),
+			g_perf_frames, g_mapname, g_rigcam_on ? ", rigcam" : "" );
+		g_perf_t0 = now; g_perf_frames = 0;
+	}
+}
+
 void qdx_maplights_draw()
 {
+	perf_tick();
 	if ( !remixOnline )
 		return;
 
