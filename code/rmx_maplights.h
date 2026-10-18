@@ -38,6 +38,15 @@ void qdx_maplights_device_ready();
 // Called from the ref_gl.dll R_RenderView hook (game thread): copies the frame's dynamic lights
 // (muzzle flashes, explosions, spells) from Anachronox's refdef_t; drawn as Remix lights by qdx_maplights_draw().
 void qdx_dlights_capture( const void *refdef );
+// Model fill lights (option model_fill in [maplights.*]): Quake 2 lights models with the lightmap value under
+// them (R_LightPoint), which path tracing has no equivalent for. Called after R_RenderView with the rendered
+// refdef; light_point is ref_gl.dll's R_LightPoint, num_dlights its r_newrefdef.num_dlights (zeroed during the
+// call so only the lightmap counts).
+void qdx_modelfill_init( void ( __cdecl *light_point )( const float *p, float *color ), int *num_dlights );
+// The map's model light (R_RenderView copies it from the world's light info for entities with renderfx 0x800):
+// color[3] and an offset[3] from the model origin to the light.
+void qdx_modelfill_set_model_light( const float *color, const float *offset );
+void qdx_modelfill_capture( const void *refdef );
 // Test rig camera: when <game>/rtx-remix/rigcam.txt holds "x y z pitch yaw [roll]", world views are rendered
 // from there (a modified copy of the refdef is returned; the game's own state is untouched). Otherwise refdef.
 void *qdx_rigcam_apply( void *refdef );
