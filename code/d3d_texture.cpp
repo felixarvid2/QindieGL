@@ -849,6 +849,12 @@ static bool proctex_intercept( D3DTextureObject *tex )
 	if ( p.written ) return true;
 	GLuint w = tex->GetWidth(), h = tex->GetHeight();
 	if ( !w || !h || !tex->GetD3DTexture() ) return false; // not created yet: let the game create it first
+	// a new D3D texture, as for any glTexImage2D: filling the one created with the game's first frame keeps
+	// Remix's texture hash from that frame
+	D3DFORMAT d3dfmt = tex->GetD3DFormat();
+	GLboolean mipmaps = tex->GetMipmaps();
+	tex->FreeD3DTexture();
+	if ( FAILED( tex->CreateD3DTexture( GL_TEXTURE_2D, w, h, 1, GL_FALSE, d3dfmt, mipmaps ) ) ) return false;
 	std::vector<uint8_t> px( (size_t)w * h * 4 );
 	for ( size_t i = 0; i < (size_t)w * h; i++ )
 	{
@@ -857,7 +863,7 @@ static bool proctex_intercept( D3DTextureObject *tex )
 		px[i * 4 + 2] = (uint8_t)( p.color );
 		px[i * 4 + 3] = 255;
 	}
-	if ( FAILED( tex->FillTextureSubLevel( 0, 0, 0, 0, 0, w, h, 1, GL_RGBA, GL_UNSIGNED_BYTE, px.data() ) ) ) return false;
+	if ( FAILED( tex->FillTextureLevel( 0, 0, d3dfmt == D3DFMT_X8R8G8B8 ? GL_RGB8 : GL_RGBA8, w, h, 1, GL_RGBA, GL_UNSIGNED_BYTE, px.data() ) ) ) return false;
 	tex->CheckMipmapAutogen();
 	D3DTexDump_Level0( tex );
 	p.written = true;
