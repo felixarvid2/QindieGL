@@ -20,6 +20,8 @@
 
 static char g_mapname[128] = { 0 };
 static volatile LONG g_map_changed = 0;
+static int g_map_apply_pending = -1;
+static unsigned long g_device_generation = 0;
 
 // Quake 2 light styles (g_spawn.c SP_worldspawn); styles 32..62 are switches, treated as on
 static const char *maplights_style_string( int style )
@@ -270,6 +272,40 @@ static void maplights_destroy()
 		if ( g_lights[i].handle )
 			remixInterface.DestroyLight( g_lights[i].handle );
 	g_lights.clear();
+}
+
+void qdx_maplights_device_lost()
+{
+	if ( !g_lights.empty() || g_dl_handle_count )
+		logPrintf( "MapLights: device %lu releasing %u map lights and %d dynamic lights before teardown\n",
+			g_device_generation, (unsigned)g_lights.size(), g_dl_handle_count );
+	if ( remixOnline )
+	{
+		maplights_destroy();
+		for ( int i = 0; i < g_dl_handle_count; i++ )
+			remixInterface.DestroyLight( g_dl_handles[i] );
+	}
+	else
+		g_lights.clear();
+	g_dl_handle_count = g_dl_count = 0;
+	g_have_viewpos = false;
+	g_draw_frames = 120;
+	g_draw_summary_pending = false;
+	g_map_apply_pending = -1;
+	InterlockedExchange( &g_map_changed, 0 );
+}
+
+void qdx_maplights_device_ready()
+{
+	g_device_generation++;
+	if ( g_mapname[0] )
+	{
+		// The API may survive context replacement while its light resources do not.
+		// Keep the normal startup delay; do not set config variables during init.
+		logPrintf( "MapLights: device %lu ready, scheduling rebuild for '%s'\n",
+			g_device_generation, g_mapname );
+		InterlockedExchange( &g_map_changed, 1 );
+	}
 }
 
 // (re)creates the Remix light with the radiance scaled by factor (Remix lights are immutable)
@@ -635,21 +671,21 @@ void qdx_maplights_draw()
 
 	// Apply a map change some frames late: setting Remix variables while the game is still bringing up
 	// (and recreating) its device at startup crashes the Remix runtime (seen with 1.5.2 under Proton).
-	static int pending = -1;
 	if ( InterlockedExchange( &g_map_changed, 0 ) )
-		pending = MAPLIGHTS_APPLY_DELAY_FRAMES;
-	else if ( pending < 0 && g_mapname[0] && maplights_watch_changed() )
+		g_map_apply_pending = MAPLIGHTS_APPLY_DELAY_FRAMES;
+	else if ( g_map_apply_pending < 0 && g_mapname[0] && maplights_watch_changed() )
 	{
 		logPrintf( "MapLights: light file, override or customise ini changed, reloading '%s'\n", g_mapname );
 		if ( g_have_viewpos ) // to find light indices for <map>.override: tools/lights_near.py <map>.lights x y z
 			logPrintf( "MapLights: camera at %.0f %.0f %.0f\n", g_viewpos[0], g_viewpos[1], g_viewpos[2] );
-		pending = 0;
+		g_map_apply_pending = 0;
 	}
 	bool changed = false;
-	if ( pending >= 0 && pending-- == 0 )
+	if ( g_map_apply_pending >= 0 && g_map_apply_pending-- == 0 )
 		changed = true;
 	if ( changed )
 	{
+		logPrintf( "MapLights: device %lu applying lights for '%s'\n", g_device_generation, g_mapname );
 		maplights_destroy();
 		if ( g_mapname[0] )
 		{

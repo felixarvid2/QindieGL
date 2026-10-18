@@ -1,8 +1,11 @@
 # Anachronox RTX status — 2026-10-18
 
-This snapshot reconciles the live default branches: anoxrtx `9a8dc3d` and
-QindieGL `bf25ebc8`. It records existing source and published verification;
-this documentation update did not run a new build or game session.
+The initial review reconciled anoxrtx `9a8dc3d` and QindieGL `bf25ebc8`.
+The 2026-10-18 follow-up reproduced and corrected startup lighting across
+graphics-device replacement, added capture/comparison tools, and ran controlled
+Rowdy's comparisons. See [runtime evidence](https://github.com/felixarvid2/anoxrtx/blob/main/docs/startup-lighting-check.md).
+The Linux cross-build retains 385 exports; all 61 anoxrtx Python tests pass. These
+checks do not establish MSVC, stock Remix or other-map visual correctness.
 
 The implementation order is maintained in
 [anoxrtx PLAN.md](https://github.com/felixarvid2/anoxrtx/blob/main/PLAN.md).
@@ -15,13 +18,13 @@ observed at their dates; they are not the current backlog.
 | Linux/Proton foundation | Windows DLL cross-build; 385 exports recorded; GE-Proton 11-9; stock Remix 1.5.2 and Remix Plus 1.5.1 integration | MSVC and broader runtime/game coverage |
 | Image and upscaling | Borderless fullscreen; DLSS works, DLAA default | Aspect ratio, render resolution and frame-time baselines |
 | Wine compatibility | Frame generation/present metering off; old GUI input; present semaphore off; NRC disabled with `rtx.integrateIndirectMode = 0` | Recheck on runtime upgrades; no claim NRC works |
-| Map lights | BSP point/spot/sun lights, per-map formulas/settings, overrides and hot reload | Initial post-save-load state, calibration outside Rowdy's |
-| Light identity correction | QindieGL #21 merged; fresh identities fixed the reproduced reload failure; both saved views show scale 0/1 contribution | Initial dim first view remains unexplained; stock/MSVC coverage for this fix |
+| Map lights | BSP point/spot/sun lights, per-map formulas/settings, overrides and hot reload | Calibration outside Rowdy's; broader device/reset/runtime coverage |
+| Light identity correction | QindieGL #21 merged; fresh identities fixed the reproduced reload failure; both saved views show scale 0/1 contribution | Startup device replacement now releases/rebuilds lights; stock/MSVC coverage remains |
 | Animated / event lights | Timer-driven Quake styles 1–11 exist; frame dlights hook exists | Game-controlled styles/switches, pause/save synchronization, visible combat-light verification |
 | Emissive / PBR | Static emissive generator; approximate normal/roughness/metallic and glass generation; visible normals and five sign emissions in two Rowdy's views | Dynamic emission, better classification, close-up rims and other environments |
 | Textures / procedural lava | Chuncki hash remapping; HD sky/model/liquid generators; stable procedural replacement hashes | Visible lava freeze/replacement, water geometry/transparency and outdoor HD skies |
 | Fog / sky | GL fog remapping; haze observed in bricksb, sunstrip and Rowdy's; per-map Numos sky on five outdoor maps | State-driven transitions, sun/shadow direction and whitecaves-b fog |
-| Rig | Focused movement, verified save loading; physical XKB console input fix (#27 merged), 33 offline tests and both saved views recorded | Automated regression runner/comparator; outdoor/water/lava/combat locations |
+| Rig | Focused movement, verified save loading; physical XKB console input fix (#27 merged), 33 offline tests and both saved views recorded | Capture manifests and offline multi-frame comparison now implemented; outdoor/water/lava/combat locations remain |
 | Debug UI | Generic ImGui overlay exists in QindieGL | Anachronox state/light/culling diagnostics and current Proton input validation |
 | Culling / anchors / weather | Existing culling-related config experiments; Remix mesh/material API pointers | Anachronox BSP/PVS policy, anchor subsystem, wetness and rain are planned |
 | Installation | `tools/install.sh`, `tools/install.py`, `tools/toggle.sh` exist | Repeat installation/recovery checks when those paths change |
