@@ -18,6 +18,17 @@ This document assigns the QindieGL side; it does not describe shipped features.
 | 8 | Apply observed environmental states through supported runtime variables, with priorities and baseline restoration | Per-map fog/state presets; verify interpolation, pause/save/map behavior and runtime fallback |
 | 9 | Integrate outdoor weather and wet material states after those foundations | One rain map first, indoor shelter, drying and frame-time/VRAM checks; stock/Plus support explicit |
 
+## Delivered follow-up
+
+Startup device replacement now releases map/dynamic light resources before
+teardown and schedules the existing delayed map-light rebuild on the new
+device. Controlled Rowdy's evidence is in the
+[runtime report](https://github.com/felixarvid2/anoxrtx/blob/main/docs/startup-lighting-check.md).
+The Linux build retains 385 exports. anoxrtx now provides verified capture
+manifests and an offline comparator; 61 Python tests pass. Broader map/runtime
+and MSVC coverage remain separate. Next feature work is the Anachronox overlay
+extension, followed by game-driven event lighting.
+
 ## Design constraints established by source inspection
 
 - `code/rmx_maplights.cpp` already animates styles 1–11 at 10 Hz using wall

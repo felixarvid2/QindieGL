@@ -1,5 +1,6 @@
 
 #include "rmx_gen.h"
+#include "rmx_maplights.h"
 #include <stdio.h>
 #include <string.h>
 #include <string>
@@ -43,10 +44,16 @@ void rmx_init_device(void *hwnd, void *device)
 {
 	iniconf_first_init();
 	qdx_imgui_init(hwnd, device);
+#ifndef QINDIEGLSRC_NO_REMIX
+	qdx_maplights_device_ready();
+#endif
 }
 
 void rmx_deinit_device()
 {
+#ifndef QINDIEGLSRC_NO_REMIX
+	qdx_maplights_device_lost();
+#endif
 	qdx_imgui_deinit();
 }
 

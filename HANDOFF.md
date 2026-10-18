@@ -16,10 +16,15 @@ Read [STATUS.md](STATUS.md) first. The ordered feature plan is
 [anoxrtx PLAN.md](https://github.com/felixarvid2/anoxrtx/blob/main/PLAN.md), with
 [wrapper responsibilities](https://github.com/felixarvid2/QindieGL/blob/master/ROADMAP.md).
 Console input/save loading is fixed and merged (#27); map-light identity
-correction is merged (QindieGL #21). Next: diagnose initial post-save-load
-lighting while adding repeatable screenshot regression. Then extend the
-existing debug overlay, event lighting, BSP/PVS, dynamic emission, PBR
-classification, anchors, environment transitions and finally rain/wetness.
+correction is merged (QindieGL #21). The next follow-up fixed stale map-light
+handles across startup graphics-device replacement and verified automatic
+rebuilds in Rowdy's. `tools/anoxcapture.py` and `tools/anoxcompare.py` now
+provide verified capture manifests and multi-frame regression reports; see
+[lighting evidence](https://github.com/felixarvid2/anoxrtx/blob/main/docs/startup-lighting-check.md) and
+[capture workflow](https://github.com/felixarvid2/anoxrtx/blob/main/docs/screenshot-regression.md).
+Next: extend the existing debug overlay, then event lighting, BSP/PVS,
+dynamic emission, PBR classification, anchors, environment transitions and
+finally rain/wetness.
 Keep current lighting/material defaults until comparisons justify changes.
 
 The original checkout directories may lag GitHub. Inspect refs/worktrees;
@@ -49,13 +54,16 @@ QindieGL #23 remain separate open proposals at this snapshot.
 - Steam launch options (localconfig.vdf, app 242940):
   `__NV_PRIME_RENDER_OFFLOAD=1 __VK_LAYER_NV_optimus=NVIDIA_only __GLX_VENDOR_LIBRARY_NAME=nvidia VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json DXVK_LOG_LEVEL=info WINEDLLOVERRIDES="opengl32=n,b;d3d9=n,b" %command%`
   Steam must be shut down (`steam -shutdown`) before editing localconfig.vdf, or it overwrites the change.
-- Last verified installation (2026-10-18; recheck before runtime work): QindieGL `master` light-identity fix (source `642a5e5`, merged `99881f0`), **Remix Plus 1.5.1** runtime (stock Remix 1.5.2 is
+- Last verified installation (2026-10-18; recheck before runtime work): QindieGL device-lifecycle correction (building on the merged light-identity fix), **Remix Plus 1.5.1** runtime (stock Remix 1.5.2 is
   kept as `.trex.remix152` + `d3d9.dll.remix152`), Chuncki's 4x texture pack (`anoxdata/textures`,
   `TEXTURES.dat` renamed `.orig`, the pack's `ref_gl.dll`), mod at `rtx-remix/mods/anoxrt` with sublayers
   hd_sky, liquids, emissive, models_hd, pbr, proctex. QindieGL.ini `[game.anox]`: remixapi, maplights,
   maplights_scale 100, dlights, proctex, smoothnormals, camera detection. `anox_customise.ini` next to anox.exe.
-  The verified fixed DLL remains installed after the 2026-10-17 saved-view test. Its fingerprint and
-  previous-DLL backup are recorded in `~/.cache/anoxrtx/backups/maplight-identity-install.json`.
+  The tested lifecycle DLL is installed, SHA-256
+  `5f5c14395ce1038017a37a1de3e2727be552cb5fc5ee8650544eca1fbf051095`.
+  Its previous-DLL backup and installation verification are recorded in
+  `~/.cache/anoxrtx/lighting-startup-2026-10-18/installed-fix.json`.
+  All other recorded game files, saves and Steam/display settings were restored.
 - Tools: llvm-mingw is expected in `~/.local/llvm-mingw`; `tools/install.sh`
   manages a persistent Python environment in `~/.cache/anoxrtx/venv`. Confirm
   its existence and dependencies (Pillow, numpy, xxhash, usd-core, python-xlib)
@@ -155,10 +163,9 @@ when started with `+map`, so it is untested. Tuning knobs: `rtx.volumetrics.fogR
   rims on sharp colour edges still remain (`pbr_layer.py --strength`, default 2).
 - Numos sun rotation convention (shadow direction) on the five outdoor maps.
 - Map light brightness in environments other than Rowdy's.
-- Initial post-load light state still needs investigation: the first saved view's initial scale-1
-  frames looked like scale 0 until explicit reload, while the second view's initial, same-value
-  reload and final scale-1 frames agreed. Both views show clear 0/1 contribution after confirmed
-  reloads; retain defaults. See the [saved-view check](https://github.com/felixarvid2/anoxrtx/blob/main/docs/saved-view-lighting-check.md).
+- Initial lighting is corrected for the tested startup device-replacement path in Rowdy's;
+  other maps, stock Remix and in-place device Reset remain separate coverage.
+  See [startup lighting evidence](https://github.com/felixarvid2/anoxrtx/blob/main/docs/startup-lighting-check.md).
 
 ## Further ideas (priority is defined by the current plan)
 1. In-game menu for lights/overrides (QindieGL already has ImGui code for other games: `qdx_imgui_*`).
