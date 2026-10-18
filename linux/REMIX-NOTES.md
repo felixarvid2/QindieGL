@@ -3,6 +3,21 @@
 Findings from running the Remix bridge (remix-1.5.2) with this QindieGL build on Proton Experimental,
 NVIDIA RTX 5060 laptop + AMD iGPU, driver 595, COSMIC/Wayland (XWayland).
 
+## Current status — 2026-10-18
+
+The findings below describe the original stock-runtime investigation. Later
+GE-Proton 11-9 tests also used Remix Plus 1.5.1; DLSS works with DLAA as the
+default. Preserve `rtx.integrateIndirectMode = 0`: NRC does not work in this
+setup, and runtime config updates otherwise risk re-enabling it. API lighting
+requires `exposeRemixApi = True`. Frame generation/present metering and the
+new GUI input remain disabled, with `presentSemaphoreEnabled = False`.
+
+Rig startup now accepts stable visible game content without requiring a stock
+`Camera cut` log, and focused movement/save loading are verified. Remix overlay
+hotkeys are a separate check from the fixed game-console input. See
+[STATUS.md](../STATUS.md), [HANDOFF.md](../HANDOFF.md) and
+[ROADMAP.md](../ROADMAP.md) for current scope and remaining verification.
+
 ## Fixed: server hang inside Present
 Symptom: client logs `Still waiting on the Present semaphore`, server (`NvRemixBridge.exe`) stuck in
 `IDirect3DSwapChain9_Present`, `dxvk-queue` polling `/dev/nvidia0`, GPU idle (P8).

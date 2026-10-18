@@ -12,7 +12,12 @@ cmake --build build-linux -j8
 
 Steam launch option: `WINEDLLOVERRIDES="opengl32=n,b" %command%`
 
+Current Anachronox scope and verification gaps are in [STATUS.md](../STATUS.md),
+with wrapper priorities in [ROADMAP.md](../ROADMAP.md). A successful cross-build
+does not establish MSVC or visual correctness.
+
 Notes
+
 - Shaders are built from source (`SHADERS_FROM_SOURCE=1`), compiled at runtime by d3dx.
 - `linux/gen-def.py` generates the export .def: the code is C++-mangled stdcall, `msvc/opengl32.def`
   lists plain GL names. The export table matches the official 1.2.2 build (385 names).
