@@ -26,8 +26,11 @@ device. Controlled Rowdy's evidence is in the
 [runtime report](https://github.com/felixarvid2/anoxrtx/blob/main/docs/startup-lighting-check.md).
 The Linux build retains 385 exports. anoxrtx now provides verified capture
 manifests and an offline comparator; 61 Python tests pass. Broader map/runtime
-and MSVC coverage remain separate. Next feature work is the Anachronox overlay
-extension, followed by game-driven event lighting.
+and MSVC coverage remain separate. Items 2 and 3 are implemented (2026-10-18): the
+Anachronox diagnostics panel (F8 / Alt+C) and game-driven light styles, verified under
+Proton in crevice and levant1 (styles valid, START_OFF lights held off by the game's
+style). Culling diagnostics in the panel, switching a light on in play, pause and save
+restore remain to be verified. Next is item 4 (culling policy).
 
 ## Design constraints established by source inspection
 
