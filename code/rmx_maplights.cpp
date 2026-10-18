@@ -51,9 +51,11 @@ struct maplight_t
 	remixapi_LightInfoDistantEXT distant;
 	bool isSun;
 	remixapi_Float3D radiance; // unscaled-by-style radiance
-	const char *styleStr;
+	const char *styleStr; // timer fallback for styles 1..11
 	size_t styleLen;
 	int lastIdx;
+	int style;     // authored BSP style 0..63 (0 = steady)
+	bool startoff; // START_OFF entity: dark until the game's style says otherwise
 	float factor; // factor of the currently created handle
 };
 
@@ -75,6 +77,12 @@ static unsigned long g_draw_attempted, g_draw_success, g_draw_failed;
 static unsigned long g_draw_frames = 120; // collect only after the first load
 static bool g_draw_have_first_error, g_draw_summary_pending;
 static remixapi_ErrorCode g_draw_first_error;
+struct frame_draw_t { unsigned long attempted, success, failed; int first_error; };
+static frame_draw_t g_last_frame_draw = { 0, 0, 0, 0 };
+static unsigned long g_last_live = 0, g_dl_last_captured = 0;
+static char g_reload_reason[48] = "none";
+static std::string g_config_file;
+extern "C" const char *g_remix_api_layout; // d3d_global.cpp
 
 // Light formula, read per map from <game>_customise.ini: [maplights.<map>], falling back to [maplights.global].
 // For files with a "format raw" line (intensity column = the BSP light value):
@@ -126,12 +134,62 @@ static int g_dl_logged = 0;
 static float g_viewpos[3];
 static bool g_have_viewpos = false;
 
+// Game-driven light styles (event lighting). Anachronox keeps Quake 2's lightstyle_t {rgb[3], white} array:
+// refdef +0x68 is the pointer; ref_gl indexes it with surface style bytes << 4 and reads white at +0xc.
+// Quake 2 normalises a style character as (c - 'a') / ('m' - 'a'), so a steady style 0 has rgb 1,1,1.
+#define REFDEF_TIME 0x58
+#define REFDEF_LIGHTSTYLES 0x68
+#define EVENT_STYLES 64
+static float g_styles[EVENT_STYLES][4];
+static bool g_styles_valid = false;
+static float g_game_time = 0.0f;
+static unsigned long g_style_updates = 0, g_style_create_failed = 0;
+static int g_event_lights = 1; // [maplights.*] event_lights
+static int g_dl_enabled = 1;
+void qdx_dlights_set_enabled( int enabled ) { g_dl_enabled = enabled ? 1 : 0; }
+
+static ULONGLONG g_styles_tick = 0;
+
+// Called for every R_RenderView, including UI/model views without world light styles: keep the last valid
+// world values and only fall back to timers after a second without any valid view.
+static void lightstyles_capture( const BYTE *b )
+{
+	bool ok = false;
+	const float *ls = NULL;
+	if ( !IsBadReadPtr( b + REFDEF_LIGHTSTYLES, 4 ) )
+		ls = *(const float * const *)( b + REFDEF_LIGHTSTYLES );
+	if ( ls && !IsBadReadPtr( ls, sizeof( g_styles ) ) )
+	{
+		ok = ls[0] > 0.9f && ls[0] < 1.1f && ls[1] > 0.9f && ls[1] < 1.1f && ls[2] > 0.9f && ls[2] < 1.1f;
+		for ( int i = 0; ok && i < EVENT_STYLES * 4; i++ )
+			ok = ls[i] >= 0.0f && ls[i] < 64.0f; // also rejects NaN
+	}
+	ULONGLONG now = GetTickCount64();
+	if ( ok )
+	{
+		memcpy( g_styles, ls, sizeof( g_styles ) );
+		g_game_time = *(const float *)( b + REFDEF_TIME );
+		g_styles_tick = now;
+	}
+	bool valid = ok || ( g_styles_tick && now - g_styles_tick < 1000 );
+	if ( valid != g_styles_valid )
+		logPrintf( "EventLights: game light styles %s\n", valid ? "valid, map lights follow the game" : "unavailable, timer fallback" );
+	g_styles_valid = valid;
+}
+
+static float lightstyle_factor( int style )
+{
+	return ( g_styles[style][0] + g_styles[style][1] + g_styles[style][2] ) / 3.0f;
+}
+
 void qdx_dlights_capture( const void *refdef )
 {
 	const BYTE *b = (const BYTE *)refdef;
 	if ( !b || IsBadReadPtr( b, REFDEF_DLIGHTS + 4 ) ) return;
 	memcpy( g_viewpos, b + 0x18, sizeof( g_viewpos ) ); // vieworg, as in Quake 2
 	g_have_viewpos = true;
+	lightstyles_capture( b );
+	if ( !g_dl_enabled ) return;
 	int n = *(const int *)( b + REFDEF_NUM_DLIGHTS );
 	const q2dlight_t *dl = *(const q2dlight_t * const *)( b + REFDEF_DLIGHTS );
 	static int calls = 0;
@@ -186,6 +244,7 @@ static void dlights_draw()
 			g_dl_handles[g_dl_handle_count++] = h;
 		}
 	}
+	g_dl_last_captured = (unsigned long)g_dl_count;
 	g_dl_count = 0;
 }
 
@@ -224,6 +283,7 @@ static void maplights_watch( const std::string &lights_file, const std::string &
 	g_watch_files[0] = lights_file;
 	g_watch_files[1] = maplights_game_dir() + "\\" + name;
 	g_watch_files[2] = override_file;
+	g_config_file = g_watch_files[1];
 	for ( int i = 0; i < WATCH_FILES; i++ )
 		g_watch_times[i] = maplights_mtime( g_watch_files[i] );
 }
@@ -505,6 +565,7 @@ static void maplights_load()
 		bool isSun = nt > 0 && _stricmp( tok[0], "sun" ) == 0;
 		float v[12];
 		int nv = 0, style = 0;
+		bool startoff = false;
 		bool ok = true;
 		if ( isSun )
 		{
@@ -533,14 +594,18 @@ static void maplights_load()
 				nv++;
 			}
 			if ( nv != 8 && nv != 12 ) ok = false;
-			else if ( nv < nt )
+			// optional tokens: style N (0..63), startoff
+			for ( int ti = nv; ok && ti < nt; ti++ )
 			{
-				if ( nt - nv == 2 && _stricmp( tok[nv], "style" ) == 0 )
+				if ( _stricmp( tok[ti], "style" ) == 0 && ti + 1 < nt )
 				{
 					char *end;
-					style = (int)strtol( tok[nv + 1], &end, 10 );
-					if ( end == tok[nv + 1] || *end ) ok = false;
+					style = (int)strtol( tok[ti + 1], &end, 10 );
+					if ( end == tok[ti + 1] || *end || style < 0 || style >= EVENT_STYLES ) ok = false;
+					ti++;
 				}
+				else if ( _stricmp( tok[ti], "startoff" ) == 0 )
+					startoff = true;
 				else ok = false;
 			}
 		}
@@ -640,18 +705,21 @@ static void maplights_load()
 			l.radiance.z = v[5] * intensity;
 			l.styleStr = maplights_style_string( style );
 			l.styleLen = l.styleStr ? strlen( l.styleStr ) : 0;
+			l.style = style;
+			l.startoff = startoff;
 		}
 
 		l.info.sType = REMIXAPI_STRUCT_TYPE_LIGHT_INFO;
 
 		// animated lights start at the style's first character; the first draw corrects it
 		float f0 = l.styleStr ? (float)( l.styleStr[0] - 'a' ) / (float)( 'm' - 'a' ) : 1.0f;
+		if ( l.startoff ) f0 = 0.0f; // the game's style (if valid) switches it on in the first draw
 		if ( !maplights_create( l, f0 ) )
 		{
 			if ( bad++ < 5 ) logPrintf( "MapLights: CreateLight failed\n" );
 			continue;
 		}
-		if ( l.styleStr ) animated++;
+		if ( l.styleStr || l.style > 0 || l.startoff ) animated++;
 		if ( isSun ) haveSun = true;
 		g_lights.push_back( l );
 	}
@@ -672,13 +740,17 @@ void qdx_maplights_draw()
 	// Apply a map change some frames late: setting Remix variables while the game is still bringing up
 	// (and recreating) its device at startup crashes the Remix runtime (seen with 1.5.2 under Proton).
 	if ( InterlockedExchange( &g_map_changed, 0 ) )
+	{
 		g_map_apply_pending = MAPLIGHTS_APPLY_DELAY_FRAMES;
+		strcpy( g_reload_reason, "map load / device" );
+	}
 	else if ( g_map_apply_pending < 0 && g_mapname[0] && maplights_watch_changed() )
 	{
 		logPrintf( "MapLights: light file, override or customise ini changed, reloading '%s'\n", g_mapname );
 		if ( g_have_viewpos ) // to find light indices for <map>.override: tools/lights_near.py <map>.lights x y z
 			logPrintf( "MapLights: camera at %.0f %.0f %.0f\n", g_viewpos[0], g_viewpos[1], g_viewpos[2] );
 		g_map_apply_pending = 0;
+		strcpy( g_reload_reason, "file changed" );
 	}
 	bool changed = false;
 	if ( g_map_apply_pending >= 0 && g_map_apply_pending-- == 0 )
@@ -692,6 +764,7 @@ void qdx_maplights_draw()
 			// per-map Remix variables ([rtxconf.default] / [rtxconf.<map>]) and the map's ini sections
 			qdx_begin_loading_map( g_mapname );
 			g_prm = maplights_read_params();
+			g_event_lights = qdx_readmapconfflt( "maplights", "event_lights", 1.0f ) != 0.0f;
 			if ( D3DGlobal.settings.game.mapLights )
 				maplights_load();
 			else
@@ -710,11 +783,22 @@ void qdx_maplights_draw()
 		drawSummaryFrame = g_draw_summary_pending || g_draw_frames == 120;
 	}
 	unsigned long liveHandles = 0;
+	frame_draw_t fd = { 0, 0, 0, 0 };
 	size_t tick = (size_t)( ( GetTickCount64() - g_load_tick ) / 100 ); // 10 Hz
 	for ( size_t i = 0; i < g_lights.size(); i++ )
 	{
 		maplight_t &l = g_lights[i];
-		if ( l.styleStr )
+		if ( g_event_lights && g_styles_valid && l.style > 0 )
+		{
+			// the game's own style value: synchronised with pause/saves, and switches turn lights on/off
+			float f = lightstyle_factor( l.style );
+			if ( fabsf( f - l.factor ) > 0.01f )
+			{
+				g_style_updates++;
+				if ( !maplights_create( l, f ) ) g_style_create_failed++;
+			}
+		}
+		else if ( l.styleStr )
 		{
 			int ci = (int)( tick % l.styleLen );
 			if ( ci != l.lastIdx )
@@ -725,13 +809,18 @@ void qdx_maplights_draw()
 					maplights_create( l, f );
 			}
 		}
+		else if ( l.startoff && l.factor != 0.0f )
+			maplights_create( l, 0.0f ); // no game data: authored-off lights stay off
 		if ( l.handle )
 		{
 			liveHandles++;
+			remixapi_ErrorCode rc = remixInterface.DrawLightInstance( l.handle );
+			fd.attempted++;
+			if ( rc == REMIXAPI_ERROR_CODE_SUCCESS ) fd.success++;
+			else if ( fd.failed++ == 0 ) fd.first_error = (int)rc;
 			if ( collectDrawStats )
 			{
 				g_draw_attempted++;
-				remixapi_ErrorCode rc = remixInterface.DrawLightInstance( l.handle );
 				if ( rc == REMIXAPI_ERROR_CODE_SUCCESS )
 					g_draw_success++;
 				else
@@ -744,10 +833,10 @@ void qdx_maplights_draw()
 					}
 				}
 			}
-			else
-				remixInterface.DrawLightInstance( l.handle );
 		}
 	}
+	g_last_frame_draw = fd;
+	g_last_live = liveHandles;
 	if ( drawSummaryFrame )
 	{
 		logPrintf( "MapLights: %s static draw frame %lu attempted %lu success %lu failed %lu first_error %d live_handles %lu\n",
@@ -755,5 +844,49 @@ void qdx_maplights_draw()
 			g_draw_have_first_error ? (int)g_draw_first_error : 0, liveHandles );
 		g_draw_summary_pending = false;
 	}
+}
+
+// Snapshot for the overlay (render thread, same thread as qdx_maplights_draw); read-only.
+void qdx_anox_get_diagnostics( qdx_anox_diagnostics_t *d )
+{
+	memset( d, 0, sizeof( *d ) );
+	strncpy( d->map_name, g_mapname, sizeof( d->map_name ) - 1 );
+	strncpy( d->config_file, g_config_file.c_str(), sizeof( d->config_file ) - 1 );
+	strncpy( d->reload_reason, g_reload_reason, sizeof( d->reload_reason ) - 1 );
+	strncpy( d->api_layout, g_remix_api_layout ? g_remix_api_layout : "?", sizeof( d->api_layout ) - 1 );
+	d->api_online = remixOnline ? 1 : 0;
+	d->camera_valid = g_have_viewpos ? 1 : 0;
+	memcpy( d->camera, g_viewpos, sizeof( d->camera ) );
+	d->pending_frames = g_map_apply_pending;
+	d->device_generation = g_device_generation;
+	d->scale = g_prm.scale; d->exponent = g_prm.exponent; d->ref = g_prm.ref;
+	d->radius = g_prm.radius; d->sun_scale = g_prm.sun_scale;
+	d->static_lights = (unsigned long)g_lights.size();
+	d->live_static_lights = g_last_live;
+	for ( size_t i = 0; i < g_lights.size(); i++ )
+	{
+		const maplight_t &l = g_lights[i];
+		if ( l.styleStr || l.style > 0 ) d->animated_lights++;
+		if ( l.startoff || l.style >= 32 ) d->switched_lights++;
+		if ( l.style > 0 && l.style < 64 ) d->style_used[l.style] = 1;
+	}
+	d->create_attempted = g_create_stats.attempted;
+	d->create_success = g_create_stats.success;
+	d->create_failed = g_create_stats.failed;
+	d->create_first_error = g_create_stats.haveFirstError ? (int)g_create_stats.firstError : 0;
+	d->frame_draw_attempted = g_last_frame_draw.attempted;
+	d->frame_draw_success = g_last_frame_draw.success;
+	d->frame_draw_failed = g_last_frame_draw.failed;
+	d->frame_draw_first_error = g_last_frame_draw.first_error;
+	d->dynamic_captured = g_dl_last_captured;
+	d->dynamic_live = (unsigned long)g_dl_handle_count;
+	d->event_lights_enabled = g_event_lights;
+	d->game_styles_valid = g_styles_valid ? 1 : 0;
+	d->game_time = g_game_time;
+	d->style_updates = g_style_updates;
+	d->style_create_failed = g_style_create_failed;
+	for ( int i = 0; i < 64 && i < EVENT_STYLES; i++ )
+		for ( int c = 0; c < 3; c++ )
+			d->style_rgb[i][c] = g_styles[i][c];
 }
 #endif //QINDIEGLSRC_NO_REMIX
