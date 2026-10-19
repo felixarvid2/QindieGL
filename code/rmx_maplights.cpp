@@ -182,6 +182,36 @@ static float lightstyle_factor( int style )
 	return ( g_styles[style][0] + g_styles[style][1] + g_styles[style][2] ) / 3.0f;
 }
 
+// Test rig: rtx-remix/rigdlight.txt "X Y Z R G B INTENSITY" per line adds dynamic lights as if the game sent
+// them (Anachronox only creates dlights in scripted scenes and battles). Polled like rigcam.txt.
+static std::string maplights_game_dir();
+static FILETIME maplights_mtime( const std::string &file );
+static q2dlight_t g_rigdl[8];
+static int g_rigdl_count = 0;
+static FILETIME g_rigdl_time = { 0, 0 };
+static ULONGLONG g_rigdl_tick = 0;
+static void rigdlight_poll()
+{
+	ULONGLONG now = GetTickCount64();
+	if ( now - g_rigdl_tick < 250 ) return;
+	g_rigdl_tick = now;
+	std::string file = maplights_game_dir() + "\\rtx-remix\\rigdlight.txt";
+	FILETIME t = maplights_mtime( file );
+	if ( CompareFileTime( &t, &g_rigdl_time ) == 0 ) return;
+	g_rigdl_time = t;
+	g_rigdl_count = 0;
+	FILE *f = ( t.dwLowDateTime || t.dwHighDateTime ) ? fopen( file.c_str(), "r" ) : NULL;
+	if ( f )
+	{
+		q2dlight_t d;
+		while ( g_rigdl_count < 8 && fscanf( f, "%f %f %f %f %f %f %f", &d.origin[0], &d.origin[1], &d.origin[2],
+			&d.color[0], &d.color[1], &d.color[2], &d.intensity ) == 7 )
+			g_rigdl[g_rigdl_count++] = d;
+		fclose( f );
+	}
+	logPrintf( "RigDLight: %d test dynamic lights\n", g_rigdl_count );
+}
+
 void qdx_dlights_capture( const void *refdef )
 {
 	const BYTE *b = (const BYTE *)refdef;
@@ -196,12 +226,15 @@ void qdx_dlights_capture( const void *refdef )
 	if ( calls++ == 300 ) // a few seconds in: check the layout (vieworg is at +0x18 like in Quake 2)
 		logPrintf( "DLights: R_RenderView refdef vieworg %.0f %.0f %.0f num_dlights %d dlights %p\n",
 			( (const float *)b )[6], ( (const float *)b )[7], ( (const float *)b )[8], n, dl );
-	if ( n <= 0 || !dl ) return;
-	if ( n > DLIGHTS_MAX ) n = DLIGHTS_MAX;
-	if ( IsBadReadPtr( dl, n * sizeof( q2dlight_t ) ) ) return;
-	if ( n < g_dl_count ) return; // several views per frame: keep the one with the most lights
-	memcpy( g_dl, dl, n * sizeof( q2dlight_t ) );
-	g_dl_count = n;
+	rigdlight_poll();
+	if ( n < 0 || ( n > 0 && !dl ) ) n = 0;
+	if ( n > DLIGHTS_MAX - 8 ) n = DLIGHTS_MAX - 8;
+	if ( n && IsBadReadPtr( dl, n * sizeof( q2dlight_t ) ) ) return;
+	if ( n + g_rigdl_count == 0 || n + g_rigdl_count < g_dl_count ) return; // several views per frame: keep the one with the most lights
+	if ( n ) memcpy( g_dl, dl, n * sizeof( q2dlight_t ) );
+	memcpy( g_dl + n, g_rigdl, g_rigdl_count * sizeof( q2dlight_t ) );
+	g_dl_count = n + g_rigdl_count;
+	if ( !n ) return;
 	if ( g_dl_logged < 5 )
 	{
 		g_dl_logged++;
@@ -241,11 +274,17 @@ static void dlights_draw()
 		info.radiance.y = ( d.color[1] > 0.0f ? d.color[1] : 0.0f ) * inten;
 		info.radiance.z = ( d.color[2] > 0.0f ? d.color[2] : 0.0f ) * inten;
 		remixapi_LightHandle h = 0;
-		if ( remixInterface.CreateLight( &info, &h ) == REMIXAPI_ERROR_CODE_SUCCESS && h )
+		remixapi_ErrorCode rc = remixInterface.CreateLight( &info, &h );
+		if ( rc == REMIXAPI_ERROR_CODE_SUCCESS && h )
 		{
-			remixInterface.DrawLightInstance( h );
+			rc = remixInterface.DrawLightInstance( h );
 			g_dl_handles[g_dl_handle_count++] = h;
 		}
+		static int logged = 0;
+		if ( logged < 3 && ( ++logged ) )
+			logPrintf( "DLights: draw %d at %.0f %.0f %.0f radiance %.0f %.0f %.0f radius %g, result %d (view %.0f %.0f %.0f)\n", i,
+				d.origin[0], d.origin[1], d.origin[2], info.radiance.x, info.radiance.y, info.radiance.z, sphere.radius, (int)rc,
+				g_viewpos[0], g_viewpos[1], g_viewpos[2] );
 	}
 	g_dl_last_captured = (unsigned long)g_dl_count;
 	g_dl_count = 0;
