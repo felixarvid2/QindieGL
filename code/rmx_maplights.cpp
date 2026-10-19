@@ -292,7 +292,7 @@ static void dlights_draw()
 
 // ---- model fill lights ----
 // Anachronox entity_t (from ref_gl.dll R_DrawEntitiesOnList / R_LightPoint): 0x1b0 bytes, origin at +0x64,
-// renderfx at +0x174 (0x2000: not drawn), model_t * at +0x184; model type at model +0x104 (R_DrawEntitiesOnList:
+// renderfx at +0x174 (bit order as gamex86's RF_ names: 0x800 RF_DIRLIGHT, 0x2000 RF_NODRAW), model_t * at +0x184; model type at model +0x104 (R_DrawEntitiesOnList:
 // 1 brush, 6 character/prop models, lit with R_LightPoint).
 #define REFDEF_NUM_ENTITIES 0x6c
 #define REFDEF_ENTITIES 0x70
@@ -305,7 +305,8 @@ static void dlights_draw()
 struct modelfill_t
 {
 	float pos[3];
-	float color[3];
+	float org[3];   // model origin
+	float color[3]; // hue of the original model light (R_LightPoint + model light)
 };
 static void ( __cdecl *g_light_point )( const float *, float * ) = NULL;
 static int *g_lp_num_dlights = NULL;
@@ -313,7 +314,7 @@ static modelfill_t g_mf[MODELFILL_MAX];
 static int g_mf_count = 0;
 static remixapi_LightHandle g_mf_handles[MODELFILL_MAX];
 static int g_mf_handle_count = 0;
-static float g_mf_scale = 0.0f, g_mf_radius = 6.0f, g_mf_distance = 40.0f, g_mf_height = 16.0f, g_mf_range = 1500.0f, g_mf_model_light = 1.0f;
+static float g_mf_scale = 0.0f, g_mf_radius = 6.0f, g_mf_distance = 40.0f, g_mf_height = 40.0f, g_mf_range = 350.0f, g_mf_cone = 40.0f, g_mf_model_light = 1.0f, g_mf_light_range = 1024.0f;
 static int g_mf_logged = 0;
 
 static const float *g_ml_color = NULL, *g_ml_offset = NULL;
@@ -350,7 +351,10 @@ void qdx_modelfill_capture( const void *refdef )
 		const BYTE *model = *(const BYTE * const *)( e + ENTITY_MODEL );
 		if ( !model || IsBadReadPtr( model + MODEL_TYPE, 4 ) ) continue;
 		int type = *(const int *)( model + MODEL_TYPE );
-		if ( type != 6 || ( *(const unsigned *)( e + ENTITY_RENDERFX ) & 0x2000 ) ) continue;
+		// characters: RF_DIRLIGHT (0x800, the renderfx R_RenderView gives the map's model light), not RF_NODRAW
+		// (0x2000); props (lamps, signs) are also type 6 but without RF_DIRLIGHT
+		unsigned rfx = *(const unsigned *)( e + ENTITY_RENDERFX );
+		if ( type != 6 || ( rfx & 0x2000 ) || !( rfx & 0x800 ) ) continue;
 		const float *o = (const float *)( e + ENTITY_ORIGIN );
 		float d[3] = { view[0] - o[0], view[1] - o[1], 0.0f };
 		float len = sqrtf( d[0] * d[0] + d[1] * d[1] );
@@ -366,6 +370,7 @@ void qdx_modelfill_capture( const void *refdef )
 		m.pos[1] = o[1] + d[1] * k;
 		m.pos[2] = o[2] + g_mf_height;
 		memcpy( m.color, c, sizeof( c ) );
+		memcpy( m.org, o, sizeof( m.org ) );
 		if ( g_mf_logged < 5 )
 		{
 			g_mf_logged++;
@@ -390,14 +395,46 @@ static void modelfill_draw()
 		sphere.position.y = m.pos[1];
 		sphere.position.z = m.pos[2];
 		sphere.radius = g_mf_radius;
+		// a spot aimed at the model (origin + 28: MDA character origins are at the feet) so the floor around it
+		// and other models get little of it
+		float ax = m.org[0] - m.pos[0], ay = m.org[1] - m.pos[1], az = m.org[2] + 28.0f - m.pos[2];
+		float al = sqrtf( ax * ax + ay * ay + az * az );
+		if ( al > 1.0f && g_mf_cone > 0.0f && g_mf_cone < 90.0f )
+		{
+			sphere.shaping_hasvalue = 1;
+			sphere.shaping_value.direction.x = ax / al;
+			sphere.shaping_value.direction.y = ay / al;
+			sphere.shaping_value.direction.z = az / al;
+			sphere.shaping_value.coneAngleDegrees = g_mf_cone;
+			sphere.shaping_value.coneSoftness = 0.2f;
+			sphere.shaping_value.focusExponent = 0.0f;
+		}
 		remixapi_LightInfo info;
 		ZeroMemory( &info, sizeof( info ) );
 		info.sType = REMIXAPI_STRUCT_TYPE_LIGHT_INFO;
 		info.pNext = &sphere;
 		info.hash = 0x4D46000000000000ull | ( ++g_frame_light_serial & 0x0000FFFFFFFFFFFFull ); // "MF", fresh as "DL"
-		info.radiance.x = m.color[0] * g_mf_scale;
-		info.radiance.y = m.color[1] * g_mf_scale;
-		info.radiance.z = m.color[2] * g_mf_scale;
+		// The original lights a model about as brightly as the lightmap under it, so the fill follows the map
+		// lights' irradiance at the model origin (radiance * r^2 / d^2, no occlusion, lights within
+		// model_fill_light_range; Numos sky and suns not counted): autoexposure and the exposure bias then act
+		// on the fill as on the room. Its own irradiance at the model is radiance * radius^2 / distance^2.
+		float e = 0.0f;
+		for ( const maplight_t &l : g_lights )
+		{
+			if ( !l.handle || l.isSun ) continue;
+			float dx = l.sphere.position.x - m.org[0], dy = l.sphere.position.y - m.org[1], dz = l.sphere.position.z - m.org[2];
+			float d2 = dx * dx + dy * dy + dz * dz, r2 = l.sphere.radius * l.sphere.radius;
+			if ( d2 > g_mf_light_range * g_mf_light_range ) continue;
+			float lum = 0.2126f * l.info.radiance.x + 0.7152f * l.info.radiance.y + 0.0722f * l.info.radiance.z;
+			e += lum * r2 / ( d2 > r2 ? d2 : r2 );
+		}
+		float fx = m.pos[0] - m.org[0], fy = m.pos[1] - m.org[1], fz = m.pos[2] - m.org[2];
+		float fd2 = fx * fx + fy * fy + fz * fz;
+		float clum = 0.2126f * m.color[0] + 0.7152f * m.color[1] + 0.0722f * m.color[2];
+		float k = g_mf_scale * e * ( fd2 > 1.0f ? fd2 : 1.0f ) / ( g_mf_radius * g_mf_radius ) / ( clum > 0.05f ? clum : 0.05f );
+		info.radiance.x = m.color[0] * k;
+		info.radiance.y = m.color[1] * k;
+		info.radiance.z = m.color[2] * k;
 		remixapi_LightHandle h = 0;
 		remixapi_ErrorCode rc = remixInterface.CreateLight( &info, &h );
 		if ( rc == REMIXAPI_ERROR_CODE_SUCCESS && h )
@@ -405,8 +442,8 @@ static void modelfill_draw()
 			rc = remixInterface.DrawLightInstance( h );
 			g_mf_handles[g_mf_handle_count++] = h;
 		}
-		static int logged = 0;
-		if ( logged < 3 && ( ++logged ) )
+		static int logged = 0, frames = 0;
+		if ( ( logged < 3 && ( ++logged ) ) || ( i == 0 && ++frames % 600 == 0 ) )
 			logPrintf( "ModelFill: light %d at %.0f %.0f %.0f radiance %.1f %.1f %.1f, result %d\n", i, m.pos[0], m.pos[1], m.pos[2],
 				info.radiance.x, info.radiance.y, info.radiance.z, (int)rc );
 	}
@@ -1001,8 +1038,11 @@ void qdx_maplights_draw()
 			g_mf_scale = qdx_readmapconfflt( "maplights", "model_fill", 0.0f );
 			g_mf_radius = qdx_readmapconfflt( "maplights", "model_fill_radius", 6.0f );
 			g_mf_distance = qdx_readmapconfflt( "maplights", "model_fill_distance", 40.0f );
-			g_mf_height = qdx_readmapconfflt( "maplights", "model_fill_height", 16.0f );
+			g_mf_height = qdx_readmapconfflt( "maplights", "model_fill_height", 40.0f );
 			g_mf_model_light = qdx_readmapconfflt( "maplights", "model_fill_model_light", 1.0f );
+			g_mf_light_range = qdx_readmapconfflt( "maplights", "model_fill_light_range", 1024.0f );
+			g_mf_range = qdx_readmapconfflt( "maplights", "model_fill_range", 350.0f );
+			g_mf_cone = qdx_readmapconfflt( "maplights", "model_fill_cone", 40.0f );
 			if ( g_mf_scale > 0.0f )
 				logPrintf( "ModelFill: scale %g radius %g distance %g height %g%s\n", g_mf_scale, g_mf_radius, g_mf_distance,
 					g_mf_height, g_light_point ? "" : " (R_LightPoint not found: off)" );
