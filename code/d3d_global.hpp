@@ -168,6 +168,7 @@ typedef struct D3DGlobal_s
 			DWORD               orthovertexshader;
 			DWORD               orthoskipuntextureddraws;
 			DWORD               flashblendLights;
+			DWORD               untexturedAdditive;
 			DWORD               depthOffDisablesWrites;
 			DWORD               smoothNormals;
 			DWORD               mapLights;

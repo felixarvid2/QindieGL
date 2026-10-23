@@ -46,6 +46,7 @@ D3DIMBuffer :: D3DIMBuffer( )
 		m_vbAllocSize[i] = 0;
 	}
 	m_swapFrame = 0;
+	m_solidCount = 0;
 }
 
 D3DIMBuffer :: ~D3DIMBuffer( )
@@ -56,6 +57,8 @@ D3DIMBuffer :: ~D3DIMBuffer( )
 			m_pVertexBuffer[i]->Release();
 		}
 	}
+	for ( int i = 0; i < m_solidCount; ++i )
+		m_solid[i].tex->Release();
 }
 
 void D3DIMBuffer :: EnsureBufferSize( int numVerts )
@@ -232,6 +235,55 @@ bool D3DIMBuffer :: TryFlashblendLight()
 }
 #endif
 
+#ifndef QINDIEGLSRC_NO_REMIX
+// Untextured additive draws (Anachronox laser beams: quad strips; func_fog volumes: polygons whose vertex
+// alpha fades across the box; both blend SRC_ALPHA/ONE with the colour from the vertices) have no texture, so
+// Remix renders them as dark or black geometry. Give them a small texture of their colour: Remix then treats
+// them like a textured additive draw (translucent; the beams faint, the fog boxes no longer black).
+bool D3DIMBuffer :: WantsSolidTexture() const
+{
+	if ( !D3DGlobal.settings.game.untexturedAdditive || !remixOnline )
+		return false;
+	if ( D3DState.TextureState.currentSamplerCount || D3DState.TextureState.currentCombinerCount ||
+		!D3DState.EnableState.alphaBlendEnabled )
+		return false;
+	if ( D3DState.ColorBufferState.glBlendDst != GL_ONE || D3DGlobal_IsOrthoProjection() )
+		return false;
+	return m_primitiveType != GL_POINTS && m_primitiveType != GL_LINES &&
+		m_primitiveType != GL_LINE_STRIP && m_primitiveType != GL_LINE_LOOP;
+}
+
+LPDIRECT3DTEXTURE9 D3DIMBuffer :: SolidTexture( DWORD rgb )
+{
+	rgb &= 0xFFFFFF;
+	for ( int i = 0; i < m_solidCount; ++i )
+		if ( m_solid[i].rgb == rgb )
+			return m_solid[i].tex;
+	if ( m_solidCount >= c_MaxSolidTextures )
+		return nullptr;
+
+	LPDIRECT3DTEXTURE9 tex = nullptr;
+	if ( FAILED( D3DGlobal.pDevice->CreateTexture( 4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, NULL ) ) )
+		return nullptr;
+	D3DLOCKED_RECT lr;
+	if ( SUCCEEDED( tex->LockRect( 0, &lr, NULL, 0 ) ) )
+	{
+		for ( int y = 0; y < 4; ++y )
+		{
+			DWORD *row = (DWORD *)( (BYTE *)lr.pBits + y * lr.Pitch );
+			for ( int x = 0; x < 4; ++x )
+				row[x] = 0xFF000000 | rgb;
+		}
+		tex->UnlockRect( 0 );
+	}
+	m_solid[m_solidCount].rgb = rgb;
+	m_solid[m_solidCount].tex = tex;
+	++m_solidCount;
+	logPrintf( "untextured additive draw: colour %06x drawn with a solid texture\n", rgb );
+	return tex;
+}
+#endif
+
 void D3DIMBuffer :: End( )
 {
 	if ( !m_vertexCount || !m_bBegan ) 
@@ -358,6 +410,22 @@ void D3DIMBuffer :: End( )
 		return;
 	}
 
+	LPDIRECT3DTEXTURE9 solidTex = nullptr;
+#ifndef QINDIEGLSRC_NO_REMIX
+	if ( WantsSolidTexture() )
+		solidTex = SolidTexture( m_pBuffer[0].color );
+	if ( solidTex )
+	{
+		// colour = texture * vertex colour, alpha = vertex alpha (the device is pure: no Get*, see the reset below)
+		D3DGlobal.pDevice->SetTexture( 0, solidTex );
+		D3DGlobal.pDevice->SetTextureStageState( 0, D3DTSS_COLOROP, D3DTOP_MODULATE );
+		D3DGlobal.pDevice->SetTextureStageState( 0, D3DTSS_COLORARG1, D3DTA_TEXTURE );
+		D3DGlobal.pDevice->SetTextureStageState( 0, D3DTSS_COLORARG2, D3DTA_DIFFUSE );
+		D3DGlobal.pDevice->SetTextureStageState( 0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG2 );
+		D3DGlobal.pDevice->SetTextureStageState( 0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE );
+	}
+#endif
+
 	//reorder buffer, so it will contain a properly aligned data according to FVF
 	if ( ReorderBufferToFVF( iFVF, sizeFVF ) )
 	{
@@ -413,6 +481,15 @@ void D3DIMBuffer :: End( )
 			logPrintf( "WARNING: glBegin - unsupported mode 0x%x\n", m_primitiveType );
 			break;
 		}
+	}
+
+	if ( solidTex )
+	{
+		// back to what D3DState_SetTexture leaves for no texture and no combiners; enabling a texture again
+		// re-applies the whole stage (textureEnableChanged)
+		D3DGlobal.pDevice->SetTexture( 0, nullptr );
+		D3DGlobal.pDevice->SetTextureStageState( 0, D3DTSS_COLOROP, D3DTOP_DISABLE );
+		D3DGlobal.pDevice->SetTextureStageState( 0, D3DTSS_ALPHAOP, D3DTOP_DISABLE );
 	}
 
 	++m_swapFrame;
