@@ -47,6 +47,7 @@ D3DIMBuffer :: D3DIMBuffer( )
 	}
 	m_swapFrame = 0;
 	m_solidCount = 0;
+	m_solidUV = false;
 }
 
 D3DIMBuffer :: ~D3DIMBuffer( )
@@ -130,6 +131,10 @@ UINT D3DIMBuffer :: ReorderBufferToFVF( int fvf, int fvfsz )
 				memcpy( dst, src->texCoord[j], sizeof(FLOAT)*numCoords );
 				dst += numCoords;
 			}
+		}
+		if ( m_solidUV ) {
+			dst[0] = dst[1] = 0.5f;
+			dst += 2;
 		}
 		++src;
 	}
@@ -401,6 +406,20 @@ void D3DIMBuffer :: End( )
 			++numSamplers;
 		}
 	}
+	LPDIRECT3DTEXTURE9 solidTex = nullptr;
+#ifndef QINDIEGLSRC_NO_REMIX
+	if ( WantsSolidTexture() )
+		solidTex = SolidTexture( m_pBuffer[0].color );
+#endif
+	// Remix treats a draw without texcoords as untextured (no emissive blend override), so give the solid
+	// texture its own texcoord set (numSamplers is 0 here: no texture is enabled)
+	m_solidUV = ( solidTex != nullptr );
+	if ( m_solidUV )
+	{
+		iFVF |= D3DFVF_TEXCOORDSIZE2( numSamplers );
+		sizeFVF += 2 * sizeof( float );
+		++numSamplers;
+	}
 	iFVF |= ( numSamplers << D3DFVF_TEXCOUNT_SHIFT );
 
 	HRESULT hr = D3DGlobal.pDevice->SetFVF( iFVF );
@@ -410,10 +429,7 @@ void D3DIMBuffer :: End( )
 		return;
 	}
 
-	LPDIRECT3DTEXTURE9 solidTex = nullptr;
 #ifndef QINDIEGLSRC_NO_REMIX
-	if ( WantsSolidTexture() )
-		solidTex = SolidTexture( m_pBuffer[0].color );
 	if ( solidTex )
 	{
 		// colour = texture * vertex colour, alpha = vertex alpha (the device is pure: no Get*, see the reset below)
