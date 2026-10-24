@@ -61,9 +61,10 @@ private:
 	int			m_passedVertexCount;
 	bool		m_bBegan;
 	bool		m_bXYZW;
-	static const int c_MaxSolidTextures = 16;
+	static const int c_MaxSolidTextures = 64;
 	struct { DWORD rgb; LPDIRECT3DTEXTURE9 tex; } m_solid[c_MaxSolidTextures];
 	int			m_solidCount;
+	int			m_solidNext;	// slot replaced next once the cache is full
 	bool		m_solidUV;	// this draw gets a solid texture: one constant texcoord set is added to its vertices
 };
 

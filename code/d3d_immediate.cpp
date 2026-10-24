@@ -47,6 +47,7 @@ D3DIMBuffer :: D3DIMBuffer( )
 	}
 	m_swapFrame = 0;
 	m_solidCount = 0;
+	m_solidNext = 0;
 	m_solidUV = false;
 }
 
@@ -264,9 +265,6 @@ LPDIRECT3DTEXTURE9 D3DIMBuffer :: SolidTexture( DWORD rgb )
 	for ( int i = 0; i < m_solidCount; ++i )
 		if ( m_solid[i].rgb == rgb )
 			return m_solid[i].tex;
-	if ( m_solidCount >= c_MaxSolidTextures )
-		return nullptr;
-
 	LPDIRECT3DTEXTURE9 tex = nullptr;
 	if ( FAILED( D3DGlobal.pDevice->CreateTexture( 4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, NULL ) ) )
 		return nullptr;
@@ -281,10 +279,26 @@ LPDIRECT3DTEXTURE9 D3DIMBuffer :: SolidTexture( DWORD rgb )
 		}
 		tex->UnlockRect( 0 );
 	}
-	m_solid[m_solidCount].rgb = rgb;
-	m_solid[m_solidCount].tex = tex;
-	++m_solidCount;
-	logPrintf( "untextured additive draw: colour %06x drawn with a solid texture\n", rgb );
+	// the cache lives as long as the device (all maps): when full, replace the oldest entry, or every colour
+	// seen after the first c_MaxSolidTextures (e.g. on a later map) would be drawn untextured (black) again
+	int slot = m_solidCount;
+	if ( m_solidCount < c_MaxSolidTextures )
+		++m_solidCount;
+	else
+	{
+		slot = m_solidNext;
+		m_solidNext = ( m_solidNext + 1 ) % c_MaxSolidTextures;
+		m_solid[slot].tex->Release();
+	}
+	m_solid[slot].rgb = rgb;
+	m_solid[slot].tex = tex;
+	static int s_logged = 0;
+	if ( s_logged < 64 )
+	{
+		++s_logged;
+		logPrintf( "untextured additive draw: colour %06x drawn with a solid texture%s\n", rgb,
+			s_logged == 64 ? " (further colours not logged)" : "" );
+	}
 	return tex;
 }
 #endif
