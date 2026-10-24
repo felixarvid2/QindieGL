@@ -64,6 +64,7 @@ private:
 	static const int c_MaxSolidTextures = 16;
 	struct { DWORD rgb; LPDIRECT3DTEXTURE9 tex; } m_solid[c_MaxSolidTextures];
 	int			m_solidCount;
+	bool		m_solidUV;	// this draw gets a solid texture: one constant texcoord set is added to its vertices
 };
 
 #endif //QINDIEGL_D3D_IMMEDIATE_H
