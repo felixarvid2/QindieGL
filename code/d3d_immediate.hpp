@@ -40,6 +40,9 @@ public:
 	void End();
 	void AddVertex( float x, float y, float z );
 	void AddVertex( float x, float y, float z, float w );
+	void ForgetTexture( LPDIRECT3DBASETEXTURE9 src ); // a game texture is freed: drop its darkened copy
+	LPDIRECT3DBASETEXTURE9 BeginAlbedoDraw(); // model_albedo: returns the texture EndAlbedoDraw sets back
+	void EndAlbedoDraw( LPDIRECT3DBASETEXTURE9 src );
 
 protected:
 	void EnsureBufferSize( int numVerts );
@@ -47,6 +50,7 @@ protected:
 	bool TryPolyBlendOverlay();
 	bool WantsSolidTexture() const;
 	LPDIRECT3DTEXTURE9 SolidTexture( DWORD rgb );
+	LPDIRECT3DTEXTURE9 AlbedoTexture( LPDIRECT3DBASETEXTURE9 src, float albedo );
 	UINT ReorderBufferToFVF( int fvf, int fvfsz );
 	void SetupTexCoords( D3DIMBufferVertex *pVertex, int stage );
 
@@ -68,6 +72,10 @@ private:
 	int			m_solidNext;	// slot replaced next once the cache is full
 	LPDIRECT3DTEXTURE9 m_polyTex;	// 2x2 white texture of the polyblend overlay; its hash goes in rtx.uiTextures
 	bool		m_solidUV;	// this draw gets a solid texture: one constant texcoord set is added to its vertices
+	static const int c_MaxAlbedoTextures = 64;
+	struct { LPDIRECT3DBASETEXTURE9 src; float albedo; LPDIRECT3DTEXTURE9 tex; } m_albedo[c_MaxAlbedoTextures];	// model_albedo copies
+	int			m_albedoCount;
+	int			m_albedoNext;
 };
 
 #endif //QINDIEGL_D3D_IMMEDIATE_H

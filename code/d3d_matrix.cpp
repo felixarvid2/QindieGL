@@ -24,6 +24,7 @@
 #include "d3d_matrix_stack.hpp"
 #include "d3d_matrix_detection.hpp"
 #include "d3d_utils.hpp"
+#include "rmx_maplights.h"
 //==================================================================================
 // Some words about projection matrices
 //----------------------------------------------------------------------------------
@@ -216,6 +217,7 @@ OPENGL_API void WINAPI glMultMatrixf( const GLfloat *m )
 	if (D3DState.TransformState.matrixMode == GL_MODELVIEW)
 	{
 		D3DGlobal.modelMatrixStack->multiply( m );
+		qdx_charalbedo_place( m[12], m[13], m[14] );
 	}
 }
 OPENGL_API void WINAPI glMultMatrixd( const GLdouble *m )
@@ -346,6 +348,7 @@ OPENGL_API void WINAPI glPopMatrix( void )
 	{
 		D3DGlobal.modelMatrixStack->pop( );
 		D3DGlobal.viewMatrixStack->pop( );
+		qdx_charalbedo_pop( );
 	}
 }
 OPENGL_API void WINAPI glPushMatrix( void )
@@ -358,6 +361,7 @@ OPENGL_API void WINAPI glPushMatrix( void )
 	{
 		D3DGlobal.modelMatrixStack->push( );
 		D3DGlobal.viewMatrixStack->push( );
+		qdx_charalbedo_push( );
 	}
 }
 OPENGL_API void WINAPI glRotatef( GLfloat angle, GLfloat x, GLfloat y, GLfloat z )

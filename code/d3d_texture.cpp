@@ -22,6 +22,7 @@
 #include "d3d_global.hpp"
 #include "d3d_state.hpp"
 #include "d3d_utils.hpp"
+#include "d3d_immediate.hpp"
 #include "d3d_object.hpp"
 #include "d3d_texture.hpp"
 #include "d3d_pixels.hpp"
@@ -75,6 +76,8 @@ D3DTextureObject :: ~D3DTextureObject()
 void D3DTextureObject :: FreeD3DTexture()
 {
 	if (m_pD3DTexture) {
+		if ( D3DGlobal.pIMBuffer )
+			D3DGlobal.pIMBuffer->ForgetTexture( m_pD3DBaseTexture );
 		if (m_target == GL_TEXTURE_3D_EXT) {
 			//logPrintf("FreeD3DTexture: %i x %i x %i x %s\n", m_width, m_height, m_depth, D3DGlobal_FormatToString(m_format) );
 		} else {
@@ -212,6 +215,8 @@ HRESULT D3DTextureObject :: RecreateD3DTexture( GLboolean mipmaps )
 		srcsurf->Release();
 		dstsurf->Release();
 
+		if ( D3DGlobal.pIMBuffer )
+			D3DGlobal.pIMBuffer->ForgetTexture( m_pD3DBaseTexture );
 		m_pD3DTexture->Release();
 		m_pD3DTexture = newTexture;
 		if (m_pD3DTexture) m_pD3DTexture->SetPriority( m_priority );
@@ -224,6 +229,9 @@ HRESULT D3DTextureObject :: RecreateD3DTexture( GLboolean mipmaps )
 
 HRESULT D3DTextureObject :: FillTextureLevel( GLint cubeface, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels )
 {
+	// new texels: a model_albedo copy of the old ones is stale
+	if ( m_pD3DBaseTexture && D3DGlobal.pIMBuffer )
+		D3DGlobal.pIMBuffer->ForgetTexture( m_pD3DBaseTexture );
 	switch (internalformat) {
 	case GL_INTENSITY:
 	case GL_INTENSITY8:
@@ -334,6 +342,9 @@ HRESULT D3DTextureObject :: FillTextureLevel( GLint cubeface, GLint level, GLint
 
 HRESULT D3DTextureObject :: FillTextureSubLevel( GLint cubeface, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels )
 {
+	// new texels: a model_albedo copy of the old ones is stale
+	if ( m_pD3DBaseTexture && D3DGlobal.pIMBuffer )
+		D3DGlobal.pIMBuffer->ForgetTexture( m_pD3DBaseTexture );
 	HRESULT hr;
 	GLubyte *dstdata;
 	GLint pitch;

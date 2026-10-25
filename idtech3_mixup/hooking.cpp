@@ -133,7 +133,9 @@ static void __cdecl hk_R_RenderView( void *fd )
 {
 	qdx_dlights_capture( fd );
 	void *view = qdx_rigcam_apply( fd ); // test rig camera override (rtx-remix/rigcam.txt), else fd
+	qdx_charalbedo_capture( view );
 	fp_R_RenderView( view );
+	qdx_charalbedo_end();
 	qdx_modelfill_capture( view ); // after the view: the world model and light styles are this frame's
 }
 

@@ -109,5 +109,6 @@ private:
 void D3DTexDump_Init();
 void D3DTexDump_Level0( D3DTextureObject *tex );
 bool D3DTexDump_Hash( D3DTextureObject *tex, unsigned long long *out_hash, const char **out_format );
+bool D3DTexDump_HashD3D( LPDIRECT3DTEXTURE9 tex, unsigned long long *out_hash, const char **out_format );
 
 #endif //QINDIEGL_D3D_TEXTURE_H

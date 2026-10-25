@@ -29,6 +29,9 @@
 #ifndef QINDIEGLSRC_NO_REMIX
 #include "rmx_gen.h"
 #include "rmx_light.h"
+#include "rmx_maplights.h"
+#include "d3d_texture.hpp"
+#include <math.h>
 #endif
 
 //==================================================================================
@@ -50,6 +53,8 @@ D3DIMBuffer :: D3DIMBuffer( )
 	m_solidNext = 0;
 	m_polyTex = nullptr;
 	m_solidUV = false;
+	m_albedoCount = 0;
+	m_albedoNext = 0;
 }
 
 D3DIMBuffer :: ~D3DIMBuffer( )
@@ -64,6 +69,9 @@ D3DIMBuffer :: ~D3DIMBuffer( )
 		m_solid[i].tex->Release();
 	if ( m_polyTex )
 		m_polyTex->Release();
+	for ( int i = 0; i < m_albedoCount; ++i )
+		if ( m_albedo[i].tex )
+			m_albedo[i].tex->Release();
 }
 
 void D3DIMBuffer :: EnsureBufferSize( int numVerts )
@@ -371,6 +379,171 @@ LPDIRECT3DTEXTURE9 D3DIMBuffer :: SolidTexture( DWORD rgb )
 }
 #endif
 
+// model_albedo (rmx_maplights.h): a copy of a character texture with its colour scaled by a linear factor
+// (texels are sRGB: scaled by albedo^(1/2.2)); a new texture hash for Remix, so the texture's own replacement
+// material does not apply to the copy. 32-bit and DXT1/3/5 (the colour endpoints are scaled).
+static WORD albedo_scale565( WORD c, float s )
+{
+	int r = (int)( ( c >> 11 ) * s + 0.5f ), g = (int)( ( ( c >> 5 ) & 63 ) * s + 0.5f ), b = (int)( ( c & 31 ) * s + 0.5f );
+	return (WORD)( ( QINDIEGL_MIN( r, 31 ) << 11 ) | ( QINDIEGL_MIN( g, 63 ) << 5 ) | QINDIEGL_MIN( b, 31 ) );
+}
+
+static void albedo_scale_dxt_color( BYTE *blk, float s, bool dxt1 )
+{
+	WORD c0 = *(WORD *)blk, c1 = *(WORD *)( blk + 2 );
+	WORD n0 = albedo_scale565( c0, s ), n1 = albedo_scale565( c1, s );
+	if ( dxt1 && ( c0 > c1 ) != ( n0 > n1 ) )
+	{
+		// DXT1 picks 4-colour or 3-colour (+transparent) mode from the endpoint order: keep the original mode
+		if ( n0 == n1 )
+		{
+			if ( c0 > c1 ) { if ( n0 < 0xFFFF ) n0++; else n1--; }
+		}
+		else
+		{
+			WORD t = n0; n0 = n1; n1 = t;
+			DWORD idx = *(DWORD *)( blk + 4 ), out = 0;
+			for ( int i = 0; i < 16; i++ )
+			{
+				DWORD v = ( idx >> ( i * 2 ) ) & 3;
+				if ( c0 > c1 || v < 2 ) v ^= 1; // 4-colour: 0<->1, 2<->3; 3-colour: 0<->1
+				out |= v << ( i * 2 );
+			}
+			*(DWORD *)( blk + 4 ) = out;
+		}
+	}
+	*(WORD *)blk = n0;
+	*(WORD *)( blk + 2 ) = n1;
+}
+
+LPDIRECT3DTEXTURE9 D3DIMBuffer :: AlbedoTexture( LPDIRECT3DBASETEXTURE9 src, float albedo )
+{
+	for ( int i = 0; i < m_albedoCount; ++i )
+		if ( m_albedo[i].src == src && m_albedo[i].albedo == albedo )
+			return m_albedo[i].tex;
+	LPDIRECT3DTEXTURE9 tex = nullptr;
+	if ( src->GetType() == D3DRTYPE_TEXTURE )
+	{
+		LPDIRECT3DTEXTURE9 s = (LPDIRECT3DTEXTURE9)src;
+		D3DSURFACE_DESC desc;
+		DWORD levels = s->GetLevelCount();
+		bool dxt = false, ok = SUCCEEDED( s->GetLevelDesc( 0, &desc ) );
+		if ( ok )
+		{
+			dxt = desc.Format == D3DFMT_DXT1 || desc.Format == D3DFMT_DXT3 || desc.Format == D3DFMT_DXT5;
+			ok = dxt || desc.Format == D3DFMT_A8R8G8B8 || desc.Format == D3DFMT_X8R8G8B8;
+			if ( !ok )
+			{
+				static int s_fmt_logged = 0;
+				if ( s_fmt_logged++ < 8 )
+					logPrintf( "ModelAlbedo: texture format %d not supported, drawn unchanged\n", (int)desc.Format );
+			}
+		}
+		if ( ok )
+			ok = SUCCEEDED( D3DGlobal.pDevice->CreateTexture( desc.Width, desc.Height, levels, 0, desc.Format, D3DPOOL_MANAGED, &tex, NULL ) );
+		const float k = powf( albedo, 1.0f / 2.2f );
+		for ( DWORD l = 0; ok && l < levels; ++l )
+		{
+			D3DSURFACE_DESC ld;
+			D3DLOCKED_RECT in, out;
+			ok = SUCCEEDED( s->GetLevelDesc( l, &ld ) );
+			if ( !ok ) break;
+			if ( FAILED( s->LockRect( l, &in, NULL, D3DLOCK_READONLY ) ) ) { ok = false; break; }
+			if ( FAILED( tex->LockRect( l, &out, NULL, 0 ) ) ) { s->UnlockRect( l ); ok = false; break; }
+			if ( dxt )
+			{
+				const UINT bw = ( ld.Width + 3 ) / 4, bh = ( ld.Height + 3 ) / 4, bs = desc.Format == D3DFMT_DXT1 ? 8 : 16;
+				for ( UINT y = 0; y < bh; ++y )
+				{
+					memcpy( (BYTE *)out.pBits + y * out.Pitch, (const BYTE *)in.pBits + y * in.Pitch, bw * bs );
+					for ( UINT x = 0; x < bw; ++x )
+						albedo_scale_dxt_color( (BYTE *)out.pBits + y * out.Pitch + x * bs + ( bs - 8 ), k, bs == 8 );
+				}
+			}
+			else
+			{
+				for ( UINT y = 0; y < ld.Height; ++y )
+				{
+					const DWORD *a = (const DWORD *)( (const BYTE *)in.pBits + y * in.Pitch );
+					DWORD *b = (DWORD *)( (BYTE *)out.pBits + y * out.Pitch );
+					for ( UINT x = 0; x < ld.Width; ++x )
+					{
+						DWORD p = a[x];
+						DWORD r = (DWORD)( ( ( p >> 16 ) & 255 ) * k + 0.5f ), g = (DWORD)( ( ( p >> 8 ) & 255 ) * k + 0.5f ), bl = (DWORD)( ( p & 255 ) * k + 0.5f );
+						b[x] = ( p & 0xFF000000 ) | ( r << 16 ) | ( g << 8 ) | bl;
+					}
+				}
+			}
+			tex->UnlockRect( l );
+			s->UnlockRect( l );
+		}
+		if ( !ok && tex )
+		{
+			tex->Release();
+			tex = nullptr;
+		}
+		// every copy is logged with both Remix hashes: anoxrtx's albedo_layer.py gives the copies the original's
+		// replacement materials (HD textures) with a darkened diffuse texture
+		unsigned long long hs = 0, hc = 0;
+		static int s_logged = 0;
+		if ( tex && s_logged < 512 && D3DTexDump_HashD3D( s, &hs, NULL ) && D3DTexDump_HashD3D( tex, &hc, NULL ) )
+		{
+			++s_logged;
+			logPrintf( "ModelAlbedo: copy %016llX -> %016llX %ux%u albedo %g\n", hs, hc, desc.Width, desc.Height, albedo );
+		}
+	}
+	// failures are cached too (tex null), so an unsupported texture is not retried every draw
+	int slot = m_albedoCount;
+	if ( m_albedoCount < c_MaxAlbedoTextures )
+		++m_albedoCount;
+	else
+	{
+		slot = m_albedoNext;
+		m_albedoNext = ( m_albedoNext + 1 ) % c_MaxAlbedoTextures;
+		if ( m_albedo[slot].tex )
+			m_albedo[slot].tex->Release();
+	}
+	m_albedo[slot].src = src;
+	m_albedo[slot].albedo = albedo;
+	m_albedo[slot].tex = tex;
+	return tex;
+}
+
+// model_albedo: while a character is drawn, sampler 0 gets the darkened copy of its texture; EndAlbedoDraw sets
+// the game's texture back, so D3DState's view of the device stays right. Used by glEnd and the vertex arrays.
+LPDIRECT3DBASETEXTURE9 D3DIMBuffer :: BeginAlbedoDraw()
+{
+	const float albedo = qdx_charalbedo_factor();
+	if ( !( albedo < 1.0f ) || !D3DState.EnableState.textureEnabled[0] )
+		return nullptr;
+	D3DTextureObject *t = D3DState.TextureState.currentTexture[0][D3D_TEXTARGET_2D];
+	LPDIRECT3DTEXTURE9 copy = ( t && t->GetD3DTexture() ) ? AlbedoTexture( t->GetD3DTexture(), albedo ) : nullptr;
+	if ( !copy )
+		return nullptr;
+	D3DGlobal.pDevice->SetTexture( 0, copy );
+	return t->GetD3DTexture();
+}
+
+void D3DIMBuffer :: EndAlbedoDraw( LPDIRECT3DBASETEXTURE9 src )
+{
+	if ( src )
+		D3DGlobal.pDevice->SetTexture( 0, src );
+}
+
+void D3DIMBuffer :: ForgetTexture( LPDIRECT3DBASETEXTURE9 src )
+{
+	for ( int i = 0; i < m_albedoCount; ++i )
+		if ( m_albedo[i].src == src )
+		{
+			if ( m_albedo[i].tex )
+				m_albedo[i].tex->Release();
+			m_albedo[i] = m_albedo[--m_albedoCount];
+			if ( m_albedoNext >= m_albedoCount )
+				m_albedoNext = 0;
+			--i;
+		}
+}
+
 void D3DIMBuffer :: End( )
 {
 	if ( !m_vertexCount || !m_bBegan ) 
@@ -532,6 +705,8 @@ void D3DIMBuffer :: End( )
 	}
 #endif
 
+	LPDIRECT3DBASETEXTURE9 albedoSrc = solidTex ? nullptr : BeginAlbedoDraw();
+
 	//reorder buffer, so it will contain a properly aligned data according to FVF
 	if ( ReorderBufferToFVF( iFVF, sizeFVF ) )
 	{
@@ -588,6 +763,8 @@ void D3DIMBuffer :: End( )
 			break;
 		}
 	}
+
+	EndAlbedoDraw( albedoSrc );
 
 	if ( solidTex )
 	{

@@ -111,7 +111,11 @@ bool D3DTexDump_Hash( D3DTextureObject *tex, unsigned long long *out_hash, const
 {
 	if (!tex || tex->GetTarget() != GL_TEXTURE_2D || !tex->GetD3DTexture())
 		return false;
-	LPDIRECT3DTEXTURE9 d3dtex = (LPDIRECT3DTEXTURE9)tex->GetD3DTexture();
+	return D3DTexDump_HashD3D( (LPDIRECT3DTEXTURE9)tex->GetD3DTexture(), out_hash, out_format );
+}
+
+bool D3DTexDump_HashD3D( LPDIRECT3DTEXTURE9 d3dtex, unsigned long long *out_hash, const char **out_format )
+{
 	D3DSURFACE_DESC desc;
 	if (FAILED( d3dtex->GetLevelDesc( 0, &desc ) ))
 		return false;

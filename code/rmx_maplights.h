@@ -47,6 +47,17 @@ void qdx_modelfill_init( void ( __cdecl *light_point )( const float *p, float *c
 // color[3] and an offset[3] from the model origin to the light.
 void qdx_modelfill_set_model_light( const float *color, const float *offset );
 void qdx_modelfill_capture( const void *refdef );
+// Character albedo (option model_albedo in [maplights.*], a linear factor, 1 = off): where the path-traced room light
+// alone over-lights characters, their textures are drawn from darkened copies (d3d_immediate.cpp). capture is
+// called before R_RenderView (the RF_DIRLIGHT model origins), end after it; Anachronox pushes the modelview and
+// multiplies it by the entity's matrix (translation = origin) before drawing a model, so the matrix calls mark a
+// character's draws until the matching pop.
+void qdx_charalbedo_capture( const void *refdef );
+void qdx_charalbedo_end( void );
+void qdx_charalbedo_place( float x, float y, float z ); // a modelview glMultMatrixf's translation
+void qdx_charalbedo_push( void );
+void qdx_charalbedo_pop( void );
+float qdx_charalbedo_factor( void ); // model_albedo while a character is drawn, else 1
 // Test rig camera: when <game>/rtx-remix/rigcam.txt holds "x y z pitch yaw [roll]", world views are rendered
 // from there (a modified copy of the refdef is returned; the game's own state is untouched). Otherwise refdef.
 void *qdx_rigcam_apply( void *refdef );

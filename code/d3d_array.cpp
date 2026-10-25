@@ -900,6 +900,7 @@ void D3DVABuffer :: DrawPrimitive()
 		return;
 
 	HRESULT hr;
+	LPDIRECT3DBASETEXTURE9 albedoSrc = D3DGlobal.pIMBuffer ? D3DGlobal.pIMBuffer->BeginAlbedoDraw() : nullptr;
 
 	switch (m_primitiveType)
 	{
@@ -940,6 +941,8 @@ void D3DVABuffer :: DrawPrimitive()
 		break;
 	}
 
+	if ( albedoSrc )
+		D3DGlobal.pIMBuffer->EndAlbedoDraw( albedoSrc );
 	if (FAILED(hr))
 		D3DGlobal.lastError = hr;
 }

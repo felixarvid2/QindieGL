@@ -380,6 +380,73 @@ void qdx_modelfill_capture( const void *refdef )
 	*g_lp_num_dlights = saved;
 }
 
+// ---- character albedo (see rmx_maplights.h) ----
+#define CHARALBEDO_MAX 64
+static float g_ca_factor = 1.0f;
+static float g_ca_org[CHARALBEDO_MAX][3];
+static int g_ca_count = 0;
+static int g_ca_active = 0, g_ca_depth = 0; // inside a character's matrix push; pushes since its translate
+static int g_ca_logged = 0;
+
+void qdx_charalbedo_capture( const void *refdef )
+{
+	g_ca_count = 0;
+	g_ca_active = 0;
+	const BYTE *b = (const BYTE *)refdef;
+	if ( !( g_ca_factor < 1.0f ) || !b || IsBadReadPtr( b, REFDEF_NUM_DLIGHTS ) ) return;
+	int n = *(const int *)( b + REFDEF_NUM_ENTITIES );
+	const BYTE *ents = *(const BYTE * const *)( b + REFDEF_ENTITIES );
+	if ( n <= 0 || !ents || n > 4096 || IsBadReadPtr( ents, (size_t)n * ENTITY_SIZE ) ) return;
+	for ( int i = 0; i < n && g_ca_count < CHARALBEDO_MAX; i++ )
+	{
+		const BYTE *e = ents + (size_t)i * ENTITY_SIZE;
+		const BYTE *model = *(const BYTE * const *)( e + ENTITY_MODEL );
+		if ( !model || IsBadReadPtr( model + MODEL_TYPE, 4 ) ) continue;
+		unsigned rfx = *(const unsigned *)( e + ENTITY_RENDERFX );
+		// the same characters as the fill light: type 6 with RF_DIRLIGHT, not RF_NODRAW
+		if ( *(const int *)( model + MODEL_TYPE ) != 6 || ( rfx & 0x2000 ) || !( rfx & 0x800 ) ) continue;
+		memcpy( g_ca_org[g_ca_count++], e + ENTITY_ORIGIN, 12 );
+	}
+}
+
+void qdx_charalbedo_end( void )
+{
+	g_ca_count = 0;
+	g_ca_active = 0;
+}
+
+void qdx_charalbedo_place( float x, float y, float z )
+{
+	if ( g_ca_active ) return;
+	for ( int i = 0; i < g_ca_count; i++ )
+		if ( g_ca_org[i][0] == x && g_ca_org[i][1] == y && g_ca_org[i][2] == z )
+		{
+			g_ca_active = 1;
+			g_ca_depth = 0;
+			if ( g_ca_logged < 5 )
+			{
+				g_ca_logged++;
+				logPrintf( "ModelAlbedo: character at %.0f %.0f %.0f drawn at albedo %g\n", x, y, z, g_ca_factor );
+			}
+			return;
+		}
+}
+
+void qdx_charalbedo_push( void )
+{
+	if ( g_ca_active ) g_ca_depth++;
+}
+
+void qdx_charalbedo_pop( void )
+{
+	if ( g_ca_active && g_ca_depth-- == 0 ) g_ca_active = 0; // the pop of the push before the translate
+}
+
+float qdx_charalbedo_factor( void )
+{
+	return g_ca_active ? g_ca_factor : 1.0f;
+}
+
 static void modelfill_draw()
 {
 	for ( int i = 0; i < g_mf_handle_count; i++ )
@@ -1043,6 +1110,9 @@ void qdx_maplights_draw()
 			g_mf_light_range = qdx_readmapconfflt( "maplights", "model_fill_light_range", 1024.0f );
 			g_mf_range = qdx_readmapconfflt( "maplights", "model_fill_range", 350.0f );
 			g_mf_cone = qdx_readmapconfflt( "maplights", "model_fill_cone", 40.0f );
+			g_ca_factor = qdx_readmapconfflt( "maplights", "model_albedo", 1.0f );
+			if ( g_ca_factor < 1.0f )
+				logPrintf( "ModelAlbedo: characters drawn at albedo %g\n", g_ca_factor );
 			if ( g_mf_scale > 0.0f )
 				logPrintf( "ModelFill: scale %g radius %g distance %g height %g%s\n", g_mf_scale, g_mf_radius, g_mf_distance,
 					g_mf_height, g_light_point ? "" : " (R_LightPoint not found: off)" );
