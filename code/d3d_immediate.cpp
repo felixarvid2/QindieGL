@@ -48,6 +48,7 @@ D3DIMBuffer :: D3DIMBuffer( )
 	m_swapFrame = 0;
 	m_solidCount = 0;
 	m_solidNext = 0;
+	m_polyTex = nullptr;
 	m_solidUV = false;
 }
 
@@ -61,6 +62,8 @@ D3DIMBuffer :: ~D3DIMBuffer( )
 	}
 	for ( int i = 0; i < m_solidCount; ++i )
 		m_solid[i].tex->Release();
+	if ( m_polyTex )
+		m_polyTex->Release();
 }
 
 void D3DIMBuffer :: EnsureBufferSize( int numVerts )
@@ -246,6 +249,71 @@ bool D3DIMBuffer :: TryFlashblendLight()
 // alpha fades across the box; both blend SRC_ALPHA/ONE with the colour from the vertices) have no texture, so
 // Remix renders them as dark or black geometry. Give them a small texture of their colour: Remix then treats
 // them like a textured additive draw (translucent; the beams faint, the fog boxes no longer black).
+// idtech2 R_PolyBlend (damage flashes, underwater tint, script fades via "setblend"): one untextured quad at x = 10,
+// y/z = +-100 in front of the camera, blended SRC_ALPHA/ONE_MINUS_SRC_ALPHA. Remix path-traces it as a lit grey plane
+// that hides the view whatever its colour and alpha, so draw it as a full-screen orthographic (UI) quad instead.
+bool D3DIMBuffer :: TryPolyBlendOverlay()
+{
+	// a quad is stored as two triangles (6 vertices, see AddVertex)
+	if ( m_vertexCount != 6 || !remixOnline )
+		return false;
+	if ( D3DState.TextureState.currentSamplerCount || !D3DState.EnableState.alphaBlendEnabled )
+		return false;
+	if ( D3DState.ColorBufferState.glBlendSrc != GL_SRC_ALPHA || D3DState.ColorBufferState.glBlendDst != GL_ONE_MINUS_SRC_ALPHA )
+		return false;
+	if ( D3DGlobal_IsOrthoProjection() )
+		return false;
+	for ( int i = 0; i < 6; i++ )
+	{
+		const float *p = m_pBuffer[i].position;
+		if ( fabsf( p[0] - 10.0f ) > 1e-3f || fabsf( fabsf( p[1] ) - 100.0f ) > 1e-3f || fabsf( fabsf( p[2] ) - 100.0f ) > 1e-3f )
+			return false;
+	}
+
+	// its own texture, not the white solid texture: that one also draws white additive effects in the world
+	if ( !m_polyTex )
+	{
+		if ( FAILED( D3DGlobal.pDevice->CreateTexture( 2, 2, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &m_polyTex, NULL ) ) )
+		{
+			m_polyTex = nullptr;
+			return false;
+		}
+		D3DLOCKED_RECT lr;
+		if ( SUCCEEDED( m_polyTex->LockRect( 0, &lr, NULL, 0 ) ) )
+		{
+			for ( int y = 0; y < 2; ++y )
+				memset( (BYTE *)lr.pBits + y * lr.Pitch, 0xFF, 2 * 4 );
+			m_polyTex->UnlockRect( 0 );
+		}
+		// XXH3 of the 16 bytes, as D3DTexDump_Hash computes it
+		logPrintf( "polyblend overlay: 2x2 white texture, Remix texture hash 0x722A202F07A4B313 (needs rtx.uiTextures)\n" );
+	}
+
+	static int s_logged = 0;
+	if ( s_logged < 8 )
+	{
+		s_logged++;
+		logPrintf( "polyblend #%d drawn as a screen overlay: argb %08x\n", s_logged, m_pBuffer[0].color );
+	}
+
+	// rewrite the quad in place to the screen corners (view space: y = left, z = up) and draw it through the
+	// normal path with an orthographic projection and m_polyTex (the colour comes from the vertices). Remix draws
+	// it as UI when the texture hash is in rtx.uiTextures (rtx.orthographicIsUI is off for Anachronox)
+	for ( int i = 0; i < 6; i++ )
+	{
+		float *p = m_pBuffer[i].position;
+		const float sx = p[1] > 0 ? 0.0f : 1.0f, sy = p[2] > 0 ? 0.0f : 1.0f;
+		p[0] = sx; p[1] = sy; p[2] = 0.0f;
+	}
+	D3DXMATRIX identity, ortho;
+	D3DXMatrixIdentity( &identity );
+	D3DXMatrixOrthoOffCenterRH( &ortho, 0, 1, 1, 0, -1, 1 );
+	D3DGlobal.pDevice->SetTransform( D3DTS_WORLD, &identity );
+	D3DGlobal.pDevice->SetTransform( D3DTS_VIEW, &identity );
+	D3DGlobal.pDevice->SetTransform( D3DTS_PROJECTION, &ortho );
+	return true;
+}
+
 bool D3DIMBuffer :: WantsSolidTexture() const
 {
 	if ( !D3DGlobal.settings.game.untexturedAdditive || !remixOnline )
@@ -326,6 +394,12 @@ void D3DIMBuffer :: End( )
 			return;
 		}
 	}
+#endif
+
+	bool polyblend = false;
+#ifndef QINDIEGLSRC_NO_REMIX
+	if ( D3DGlobal.settings.game.polyblendOverlay && m_primitiveType == GL_QUADS )
+		polyblend = TryPolyBlendOverlay();
 #endif
 
 	if ( m_primitiveType == GL_LINE_LOOP ) {
@@ -422,7 +496,9 @@ void D3DIMBuffer :: End( )
 	}
 	LPDIRECT3DTEXTURE9 solidTex = nullptr;
 #ifndef QINDIEGLSRC_NO_REMIX
-	if ( WantsSolidTexture() )
+	if ( polyblend )
+		solidTex = m_polyTex;
+	else if ( WantsSolidTexture() )
 		solidTex = SolidTexture( m_pBuffer[0].color );
 #endif
 	// Remix treats a draw without texcoords as untextured (no emissive blend override), so give the solid
@@ -520,6 +596,13 @@ void D3DIMBuffer :: End( )
 		D3DGlobal.pDevice->SetTexture( 0, nullptr );
 		D3DGlobal.pDevice->SetTextureStageState( 0, D3DTSS_COLOROP, D3DTOP_DISABLE );
 		D3DGlobal.pDevice->SetTextureStageState( 0, D3DTSS_ALPHAOP, D3DTOP_DISABLE );
+	}
+
+	if ( polyblend )
+	{
+		// the next D3DState_Check sets the game's matrices again
+		D3DState.modelViewMatrixModified = true;
+		D3DState.projectionMatrixModified = true;
 	}
 
 	++m_swapFrame;

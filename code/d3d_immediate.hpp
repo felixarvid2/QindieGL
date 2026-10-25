@@ -44,6 +44,7 @@ public:
 protected:
 	void EnsureBufferSize( int numVerts );
 	bool TryFlashblendLight();
+	bool TryPolyBlendOverlay();
 	bool WantsSolidTexture() const;
 	LPDIRECT3DTEXTURE9 SolidTexture( DWORD rgb );
 	UINT ReorderBufferToFVF( int fvf, int fvfsz );
@@ -65,6 +66,7 @@ private:
 	struct { DWORD rgb; LPDIRECT3DTEXTURE9 tex; } m_solid[c_MaxSolidTextures];
 	int			m_solidCount;
 	int			m_solidNext;	// slot replaced next once the cache is full
+	LPDIRECT3DTEXTURE9 m_polyTex;	// 2x2 white texture of the polyblend overlay; its hash goes in rtx.uiTextures
 	bool		m_solidUV;	// this draw gets a solid texture: one constant texcoord set is added to its vertices
 };
 
