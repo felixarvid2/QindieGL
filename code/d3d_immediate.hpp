@@ -45,6 +45,9 @@ protected:
 	void EnsureBufferSize( int numVerts );
 	bool TryFlashblendLight();
 	bool TryPolyBlendOverlay();
+#ifndef QINDIEGLSRC_NO_REMIX
+	LPDIRECT3DTEXTURE9 StyledEmissionTexture( D3DTextureObject **outBase );
+#endif
 	bool WantsSolidTexture() const;
 	LPDIRECT3DTEXTURE9 SolidTexture( DWORD rgb );
 	UINT ReorderBufferToFVF( int fvf, int fvfsz );

@@ -11,9 +11,11 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <unordered_map>
 
 #include "d3d_wrapper.hpp"
 #include "d3d_global.hpp"
+#include "d3d_texture.hpp"
 
 #define MAPLIGHTS_MAX 4096
 #define MAPLIGHTS_APPLY_DELAY_FRAMES 120
@@ -180,6 +182,131 @@ static void lightstyles_capture( const BYTE *b )
 static float lightstyle_factor( int style )
 {
 	return ( g_styles[style][0] + g_styles[style][1] + g_styles[style][2] ) / 3.0f;
+}
+
+float qdx_lightstyle_factor( int style )
+{
+	if ( style < 0 || style >= EVENT_STYLES ) return 1.0f;
+	if ( g_event_lights && g_styles_valid && style > 0 )
+		return lightstyle_factor( style );
+	const char *str = maplights_style_string( style );
+	if ( str )
+	{
+		size_t len = strlen( str );
+		return (float)( str[( GetTickCount64() / 100 ) % len] - 'a' ) / (float)( 'm' - 'a' ); // 10 Hz like the lights
+	}
+	return 1.0f;
+}
+
+// Styled emission data: <map>.estyles, one face per line "0xHASH x y z style" (see maplights_estyles_load)
+struct estyle_t { float pos[3]; int style; };
+static std::unordered_map<unsigned long long, std::vector<estyle_t> > g_estyles;
+int qdx_estyles_active = 0;
+static unsigned long g_estyles_unmatched = 0;
+static bool g_estyles_swapped = false;
+static char g_estyles_map[128] = { 0 }; // map the data and counters belong to
+
+static void maplights_estyles_report()
+{
+	if ( g_estyles_unmatched )
+		logPrintf( "StyledEmission: '%s' %lu draws of a listed texture matched no face\n", g_estyles_map, g_estyles_unmatched );
+	g_estyles_unmatched = 0;
+}
+
+static void maplights_estyles_clear()
+{
+	maplights_estyles_report();
+	g_estyles.clear();
+	qdx_estyles_active = 0;
+	g_estyles_swapped = false;
+	g_estyles_map[0] = 0;
+	D3DTex_ReleaseAllStyledVariants();
+}
+
+// lines: "0xHASH x y z style" (# comments, blank lines ignored); HASH hex Remix hash (0x optional), x y z the face
+// centroid in world units, style 1..63. Malformed lines are skipped and counted.
+static void maplights_estyles_load( const std::string &dir )
+{
+	maplights_estyles_clear();
+	if ( !D3DGlobal.settings.game.styledEmission || dir.empty() || !g_mapname[0] )
+		return;
+	strcpy( g_estyles_map, g_mapname );
+	std::string file = dir + "\\rtx-remix\\maplights\\" + g_mapname + ".estyles";
+	FILE *f = fopen( file.c_str(), "r" );
+	if ( !f ) return;
+	char line[512];
+	int faces = 0, bad = 0;
+	while ( fgets( line, sizeof( line ), f ) )
+	{
+		char *p = line;
+		while ( *p == ' ' || *p == '\t' ) p++;
+		if ( *p == '#' || *p == '\r' || *p == '\n' || *p == 0 ) continue;
+		char *tok[8];
+		int nt = 0;
+		for ( char *t = strtok( p, " \t\r\n" ); t && nt < 8; t = strtok( NULL, " \t\r\n" ) )
+			tok[nt++] = t;
+		char *end;
+		bool ok = nt == 5;
+		unsigned long long hash = 0;
+		estyle_t e = { { 0, 0, 0 }, 0 };
+		if ( ok )
+		{
+			hash = _strtoui64( tok[0], &end, 16 );
+			ok = *end == 0;
+		}
+		for ( int i = 0; ok && i < 3; i++ )
+		{
+			e.pos[i] = (float)strtod( tok[1 + i], &end );
+			ok = *end == 0;
+		}
+		if ( ok )
+		{
+			long st = strtol( tok[4], &end, 10 );
+			ok = *end == 0 && st >= 1 && st <= 63;
+			e.style = (int)st;
+		}
+		if ( !ok ) { bad++; continue; }
+		g_estyles[hash].push_back( e );
+		faces++;
+	}
+	fclose( f );
+	if ( bad )
+		logPrintf( "StyledEmission: skipped %d malformed lines in '%s'\n", bad, file.c_str() );
+	logPrintf( "StyledEmission: %s %d faces, %u textures\n", g_mapname, faces, (unsigned)g_estyles.size() );
+	qdx_estyles_active = faces > 0;
+}
+
+int qdx_estyles_has_hash( unsigned long long hash )
+{
+	return g_estyles.find( hash ) != g_estyles.end();
+}
+
+int qdx_estyles_match( unsigned long long hash, const float *c )
+{
+	auto it = g_estyles.find( hash );
+	if ( it == g_estyles.end() ) return 0;
+	int best = 0;
+	float bestd = 1e30f;
+	for ( size_t i = 0; i < it->second.size(); i++ )
+	{
+		const estyle_t &e = it->second[i];
+		float dx = fabsf( e.pos[0] - c[0] ), dy = fabsf( e.pos[1] - c[1] ), dz = fabsf( e.pos[2] - c[2] );
+		if ( dx <= 2.0f && dy <= 2.0f && dz <= 2.0f && dx + dy + dz < bestd )
+		{
+			bestd = dx + dy + dz;
+			best = e.style;
+		}
+	}
+	return best;
+}
+
+void qdx_estyles_note_unmatched() { g_estyles_unmatched++; }
+
+void qdx_estyles_note_swap( unsigned long long hash, int style, int level )
+{
+	if ( g_estyles_swapped ) return;
+	g_estyles_swapped = true;
+	logPrintf( "StyledEmission: first swap on '%s': texture 0x%016llX style %d level %d\n", g_estyles_map, hash, style, level );
 }
 
 // Test rig: rtx-remix/rigdlight.txt "X Y Z R G B INTENSITY" per line adds dynamic lights as if the game sent
@@ -552,6 +679,7 @@ void qdx_maplights_device_lost()
 		g_lights.clear();
 	g_dl_handle_count = g_dl_count = 0;
 	g_mf_handle_count = g_mf_count = 0;
+	maplights_estyles_clear();
 	g_have_viewpos = false;
 	g_draw_frames = 120;
 	g_draw_summary_pending = false;
@@ -1029,12 +1157,14 @@ void qdx_maplights_draw()
 	{
 		logPrintf( "MapLights: device %lu applying lights for '%s'\n", g_device_generation, g_mapname );
 		maplights_destroy();
+		maplights_estyles_clear();
 		if ( g_mapname[0] )
 		{
 			// per-map Remix variables ([rtxconf.default] / [rtxconf.<map>]) and the map's ini sections
 			qdx_begin_loading_map( g_mapname );
 			g_prm = maplights_read_params();
 			g_event_lights = qdx_readmapconfflt( "maplights", "event_lights", 1.0f ) != 0.0f;
+			maplights_estyles_load( maplights_game_dir() );
 			g_mf_scale = qdx_readmapconfflt( "maplights", "model_fill", 0.0f );
 			g_mf_radius = qdx_readmapconfflt( "maplights", "model_fill_radius", 6.0f );
 			g_mf_distance = qdx_readmapconfflt( "maplights", "model_fill_distance", 40.0f );

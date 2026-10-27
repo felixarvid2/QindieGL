@@ -21,6 +21,7 @@
 #include "d3d_wrapper.hpp"
 #include "d3d_global.hpp"
 #include "d3d_state.hpp"
+#include "d3d_texture.hpp"
 #include "d3d_utils.hpp"
 #include "d3d_immediate.hpp"
 #include "d3d_normals.hpp"
@@ -29,6 +30,7 @@
 #ifndef QINDIEGLSRC_NO_REMIX
 #include "rmx_gen.h"
 #include "rmx_light.h"
+#include "rmx_maplights.h"
 #endif
 
 //==================================================================================
@@ -371,6 +373,50 @@ LPDIRECT3DTEXTURE9 D3DIMBuffer :: SolidTexture( DWORD rgb )
 }
 #endif
 
+#ifndef QINDIEGLSRC_NO_REMIX
+// The variant texture to draw this polygon with, or null. Only for world faces listed in <map>.estyles: a GL_POLYGON /
+// trifan with a 2D texture on stage 0 whose Remix hash is listed and whose centroid is within 2 units of an entry.
+LPDIRECT3DTEXTURE9 D3DIMBuffer :: StyledEmissionTexture( D3DTextureObject **outBase )
+{
+	if ( !D3DGlobal.settings.game.styledEmission || !remixOnline )
+		return nullptr;
+	if ( ( m_primitiveType != GL_POLYGON && m_primitiveType != GL_TRIANGLE_FAN ) || m_vertexCount < 3 || m_bXYZW )
+		return nullptr;
+	if ( !D3DState.EnableState.textureEnabled[0] || !D3DState.EnableState.textureTargetEnabled[0][D3D_TEXTARGET_2D] ||
+		D3DState.EnableState.textureTargetEnabled[0][D3D_TEXTARGET_3D] || D3DState.EnableState.textureTargetEnabled[0][D3D_TEXTARGET_CUBE] )
+		return nullptr;
+	D3DTextureObject *base = D3DState.TextureState.currentTexture[0][D3D_TEXTARGET_2D];
+	unsigned long long hash;
+	if ( !base || base->GetTarget() != GL_TEXTURE_2D || !base->GetD3DTexture() || !base->GetRemixHash( &hash ) )
+		return nullptr;
+	if ( !qdx_estyles_has_hash( hash ) )
+		return nullptr;
+
+	float c[3] = { 0, 0, 0 };
+	for ( int i = 0; i < m_vertexCount; ++i )
+		for ( int k = 0; k < 3; ++k )
+			c[k] += m_pBuffer[i].position[k];
+	for ( int k = 0; k < 3; ++k )
+		c[k] /= (float)m_vertexCount;
+	const int style = qdx_estyles_match( hash, c );
+	if ( !style )
+	{
+		qdx_estyles_note_unmatched();
+		return nullptr;
+	}
+	int level = (int)floorf( qdx_lightstyle_factor( style ) * 3.0f + 0.5f );
+	if ( level < 0 ) level = 0;
+	if ( level >= 3 )
+		return nullptr;
+	LPDIRECT3DTEXTURE9 variant = base->GetStyledVariant( level );
+	if ( !variant )
+		return nullptr;
+	qdx_estyles_note_swap( hash, style, level );
+	*outBase = base;
+	return variant;
+}
+#endif
+
 void D3DIMBuffer :: End( )
 {
 	if ( !m_vertexCount || !m_bBegan ) 
@@ -532,9 +578,22 @@ void D3DIMBuffer :: End( )
 	}
 #endif
 
+#ifndef QINDIEGLSRC_NO_REMIX
+	// styled emission: a lamp face whose lightstyle is dimmed is drawn with a one-byte-different copy of its texture
+	// (Remix hashes mip 0), see D3DTextureObject::GetStyledVariant
+	D3DTextureObject *styledBase = nullptr;
+	LPDIRECT3DTEXTURE9 styledTex = nullptr;
+	if ( qdx_estyles_active && !solidTex )
+		styledTex = StyledEmissionTexture( &styledBase );
+#endif
+
 	//reorder buffer, so it will contain a properly aligned data according to FVF
 	if ( ReorderBufferToFVF( iFVF, sizeFVF ) )
 	{
+#ifndef QINDIEGLSRC_NO_REMIX
+		if ( styledTex )
+			D3DGlobal.pDevice->SetTexture( 0, styledTex );
+#endif
 		hr = D3DGlobal.pDevice->SetStreamSource( 0, m_pVertexBuffer[m_swapFrame], 0, sizeFVF );
 		if (FAILED(hr)) {
 			D3DGlobal.lastError = hr;
@@ -588,6 +647,14 @@ void D3DIMBuffer :: End( )
 			break;
 		}
 	}
+
+#ifndef QINDIEGLSRC_NO_REMIX
+	if ( styledTex )
+	{
+		// the state cache (textureChanged etc.) never saw the variant: put back the texture it believes is set
+		D3DGlobal.pDevice->SetTexture( 0, styledBase->GetD3DTexture() );
+	}
+#endif
 
 	if ( solidTex )
 	{

@@ -38,6 +38,11 @@ public:
 	HRESULT DumpTexture();
 	void CheckMipmapAutogen();
 
+	// styled emission: Remix texture hash of mip 0 (cached) and byte-modified copies of the texture, see d3d_texture.cpp
+	bool GetRemixHash( unsigned long long *out_hash );
+	LPDIRECT3DTEXTURE9 GetStyledVariant( int level );
+	void InvalidateDerived();
+
 	LPDIRECT3DBASETEXTURE9 GetD3DTexture() const { return m_pD3DBaseTexture; }
 	GLenum GetTarget() const { return m_target; }
 	D3DTEXTUREADDRESS GetD3DAddressMode( int index ) const
@@ -103,7 +108,16 @@ private:
 	int						m_dstbytes;
 	D3DCOLOR				m_borderColor;
 	DWORD					m_priority;
+	// cache of GetRemixHash (0 = not computed, 1 = valid, 2 = texture not hashable)
+	int						m_remixHashState;
+	unsigned long long		m_remixHash;
+	LPDIRECT3DTEXTURE9		m_styledVariant[3];
+	bool					m_styledFailed;
+	void ReleaseStyledVariants();
 };
+
+// releases every styled-emission variant texture (map change, device loss)
+void D3DTex_ReleaseAllStyledVariants();
 
 // debug: hash/dump mip 0 of a 2D texture (RTX Remix hash), see d3d_texdump.cpp
 void D3DTexDump_Init();
