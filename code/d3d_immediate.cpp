@@ -26,6 +26,8 @@
 #include "d3d_immediate.hpp"
 #include "d3d_normals.hpp"
 #include <vector>
+#include <algorithm>
+#include <float.h>
 #include "d3d_matrix_stack.hpp"
 #ifndef QINDIEGLSRC_NO_REMIX
 #include "rmx_gen.h"
@@ -415,6 +417,91 @@ LPDIRECT3DTEXTURE9 D3DIMBuffer :: StyledEmissionTexture( D3DTextureObject **outB
 	*outBase = base;
 	return variant;
 }
+// Signed solid angle of triangle abc seen from the origin (Van Oosterom & Strackee), positive when abc is
+// clockwise seen from the origin.
+static float TriangleSolidAngle( const D3DXVECTOR3 &a, const D3DXVECTOR3 &b, const D3DXVECTOR3 &c )
+{
+	D3DXVECTOR3 bc;
+	D3DXVec3Cross( &bc, &b, &c );
+	const float la = D3DXVec3Length( &a ), lb = D3DXVec3Length( &b ), lc = D3DXVec3Length( &c );
+	const float den = la * lb * lc + D3DXVec3Dot( &a, &b ) * lc + D3DXVec3Dot( &a, &c ) * lb + D3DXVec3Dot( &b, &c ) * la;
+	return 2.0f * atan2f( D3DXVec3Dot( &a, &bc ), den );
+}
+
+// True if the camera sees the inside of this model draw (skipenclosingmodels). The original culls back faces, so from
+// inside a model, or below an open-bottomed one, the game sees through it while Remix renders its inside (baltownr's
+// start shaft lies in and under a scaled-up ob_commhill02). Only back-face-culled perspective triangle draws of 8+
+// triangles (models, not world polygons or sky quads) near the camera. The measure is the share of the sphere around
+// the eye covered by back faces minus front faces (the winding number): 0 outside a closed mesh, 1 inside, about 0.3
+// below the hill's open bottom; the draw is skipped from skipenclosingmodels percent on.
+bool D3DIMBuffer :: CameraInsideModel( GLenum mode )
+{
+	if ( !D3DGlobal.settings.game.skipEnclosingModels || !remixOnline || m_bXYZW || m_vertexCount < 24 )
+		return false;
+	if ( mode != GL_TRIANGLES && mode != GL_TRIANGLE_STRIP && mode != GL_TRIANGLE_FAN && mode != GL_QUAD_STRIP )
+		return false;
+	if ( !D3DState.EnableState.cullEnabled || D3DState.PolygonState.cullMode == GL_FRONT_AND_BACK ||
+		D3DGlobal_IsOrthoProjection() )
+		return false;
+
+	// eye in model space: the inverse modelview applied to the origin
+	D3DStateMatrix &mv = D3DGlobal.modelviewMatrixStack->top();
+	const D3DXMATRIX *inv = mv.inverse();
+	const D3DXVECTOR3 eye( inv->_41, inv->_42, inv->_43 );
+	float lo[3] = { FLT_MAX, FLT_MAX, FLT_MAX }, hi[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+	for ( int i = 0; i < m_vertexCount; ++i )
+		for ( int k = 0; k < 3; ++k )
+		{
+			lo[k] = std::min( lo[k], m_pBuffer[i].position[k] );
+			hi[k] = std::max( hi[k], m_pBuffer[i].position[k] );
+		}
+	// near the model: eye within half the box diagonal of the box
+	float out2 = 0.0f, diag2 = 0.0f;
+	for ( int k = 0; k < 3; ++k )
+	{
+		const float d = std::max( std::max( lo[k] - eye[k], eye[k] - hi[k] ), 0.0f );
+		out2 += d * d;
+		diag2 += ( hi[k] - lo[k] ) * ( hi[k] - lo[k] );
+	}
+	if ( out2 > diag2 * 0.25f )
+		return false;
+
+	static std::vector<unsigned int> s_tris;
+	D3DNormals_BuildTriangleList( mode, m_vertexCount, s_tris );
+	float omega = 0.0f;
+	for ( size_t t = 0; t + 2 < s_tris.size(); t += 3 )
+	{
+		const float *pa = m_pBuffer[s_tris[t]].position, *pb = m_pBuffer[s_tris[t + 1]].position,
+			*pc = m_pBuffer[s_tris[t + 2]].position;
+		omega += TriangleSolidAngle( D3DXVECTOR3( pa[0], pa[1], pa[2] ) - eye, D3DXVECTOR3( pb[0], pb[1], pb[2] ) - eye,
+			D3DXVECTOR3( pc[0], pc[1], pc[2] ) - eye );
+	}
+	// omega > 0: clockwise from the eye in model space. On screen that is clockwise too unless the
+	// modelview mirrors; a triangle is culled when its screen winding is the culled one.
+	const D3DXMATRIX &m = *(const D3DXMATRIX *)mv;
+	const float det = m._11 * ( m._22 * m._33 - m._23 * m._32 ) - m._12 * ( m._21 * m._33 - m._23 * m._31 ) +
+		m._13 * ( m._21 * m._32 - m._22 * m._31 );
+	const bool ccwIsFront = ( D3DState.PolygonState.frontFace == GL_CCW ) == ( det > 0.0f );
+	const bool frontCulled = ( D3DState.PolygonState.cullMode == GL_FRONT );
+	// share of the sphere covered by culled faces (net of the visible ones)
+	const float culled = ( ccwIsFront != frontCulled ? omega : -omega ) / ( 4.0f * D3DX_PI );
+	if ( culled * 100.0f < (float)D3DGlobal.settings.game.skipEnclosingModels )
+		return false;
+
+	static int s_logged = 0;
+	if ( s_logged < 32 )
+	{
+		++s_logged;
+		unsigned long long hash = 0;
+		D3DTextureObject *tex = D3DState.EnableState.textureEnabled[0] ? D3DState.TextureState.currentTexture[0][D3D_TEXTARGET_2D] : nullptr;
+		if ( !tex || !tex->GetRemixHash( &hash ) )
+			hash = 0;
+		logPrintf( "SkipEnclosingModels: camera sees the inside of a model (%d triangles, texture 0x%016llX, %.0f%% of the "
+			"view sphere), not drawn%s\n", (int)s_tris.size() / 3, hash, culled * 100.0f,
+			s_logged == 32 ? " (further skips not logged)" : "" );
+	}
+	return true;
+}
 #endif
 
 void D3DIMBuffer :: End( )
@@ -446,6 +533,14 @@ void D3DIMBuffer :: End( )
 #ifndef QINDIEGLSRC_NO_REMIX
 	if ( D3DGlobal.settings.game.polyblendOverlay && m_primitiveType == GL_QUADS )
 		polyblend = TryPolyBlendOverlay();
+#endif
+
+#ifndef QINDIEGLSRC_NO_REMIX
+	if ( CameraInsideModel( m_primitiveType == GL_QUADS ? GL_TRIANGLES : m_primitiveType ) )
+	{
+		m_bBegan = false;
+		return;
+	}
 #endif
 
 	if ( m_primitiveType == GL_LINE_LOOP ) {
