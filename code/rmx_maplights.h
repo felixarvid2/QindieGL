@@ -67,6 +67,8 @@ int qdx_estyles_match( unsigned long long hash, const float *centroid );
 // bookkeeping for the log: a draw whose texture is listed but matched no face / the first swap of the map
 void qdx_estyles_note_unmatched();
 void qdx_estyles_note_swap( unsigned long long hash, int style, int level );
+// logs a style's level changes (0..3, 3 = normal texture), the first 16 per map: shows switchable lights turning on
+void qdx_estyles_note_level( int style, int level );
 
 #ifdef __cplusplus
 } //extern "C"
