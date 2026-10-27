@@ -28,6 +28,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <set>
 #include "fnv.h"
 
 //==================================================================================
@@ -65,6 +66,10 @@ D3DTextureObject :: D3DTextureObject( GLuint gl_index )
 	m_priority = 0;
 	m_lodBias = 0;
 	m_glIndex = gl_index;
+	m_remixHashState = 0;
+	m_remixHash = 0;
+	m_styledVariant[0] = m_styledVariant[1] = m_styledVariant[2] = nullptr;
+	m_styledFailed = false;
 }
 
 D3DTextureObject :: ~D3DTextureObject()
@@ -74,6 +79,7 @@ D3DTextureObject :: ~D3DTextureObject()
 
 void D3DTextureObject :: FreeD3DTexture()
 {
+	InvalidateDerived();
 	if (m_pD3DTexture) {
 		if (m_target == GL_TEXTURE_3D_EXT) {
 			//logPrintf("FreeD3DTexture: %i x %i x %i x %s\n", m_width, m_height, m_depth, D3DGlobal_FormatToString(m_format) );
@@ -137,6 +143,7 @@ HRESULT D3DTextureObject :: CreateD3DTexture( GLenum target, GLsizei width, GLsi
 
 HRESULT D3DTextureObject :: RecreateD3DTexture( GLboolean mipmaps )
 {
+	InvalidateDerived();
 	if (!m_pD3DTexture) return E_FAIL;
 	if (m_mipmaps == mipmaps) return S_OK;
 
@@ -224,6 +231,7 @@ HRESULT D3DTextureObject :: RecreateD3DTexture( GLboolean mipmaps )
 
 HRESULT D3DTextureObject :: FillTextureLevel( GLint cubeface, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels )
 {
+	InvalidateDerived();
 	switch (internalformat) {
 	case GL_INTENSITY:
 	case GL_INTENSITY8:
@@ -334,6 +342,7 @@ HRESULT D3DTextureObject :: FillTextureLevel( GLint cubeface, GLint level, GLint
 
 HRESULT D3DTextureObject :: FillTextureSubLevel( GLint cubeface, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels )
 {
+	InvalidateDerived();
 	HRESULT hr;
 	GLubyte *dstdata;
 	GLint pitch;
@@ -412,6 +421,7 @@ HRESULT D3DTextureObject :: FillTextureSubLevel( GLint cubeface, GLint level, GL
 
 HRESULT D3DTextureObject :: CopyTextureSubLevel( GLint cubeface, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height )
 {
+	InvalidateDerived();
 	HRESULT hr;
 	LPDIRECT3DSURFACE9 lpRenderTarget( nullptr );
 
@@ -558,6 +568,7 @@ HRESULT D3DTextureObject :: CopyTextureSubLevel( GLint cubeface, GLint level, GL
 
 HRESULT D3DTextureObject :: FillCompressedTextureLevel( GLint cubeface, GLint level, GLint /*internalformat*/, GLsizei /*width*/, GLsizei /*height*/, GLsizei /*depth*/, GLsizei imageSize, const GLvoid *pixels )
 {
+	InvalidateDerived();
 	HRESULT hr;
 	GLubyte *dstdata;
 	GLint pitch;
@@ -728,6 +739,7 @@ HRESULT D3DTextureObject :: DumpTexture()
 
 void D3DTextureObject :: CheckMipmapAutogen()
 {
+	InvalidateDerived();
 	if (m_autogenMipmaps)
 		m_pD3DBaseTexture->GenerateMipSubLevels();
 }
@@ -1984,4 +1996,111 @@ OPENGL_API void WINAPI glSelectTexture( GLenum texture )
 	D3DState.TextureState.currentTMU = stageIndex;
 	if (D3DState.TransformState.matrixMode == GL_TEXTURE)
 		D3DState_SetMatrixMode();
+}
+
+
+//==================================================================================
+// Styled emission (see D3DIMBuffer::End and rmx_maplights.cpp): Remix keys materials by the hash of mip 0, so a
+// lamp texture drawn dimmer than full brightness is swapped for a copy whose mip 0 differs by one byte; the
+// mod gives each variant hash a scaled emission.
+//==================================================================================
+
+static std::set<D3DTextureObject*> g_styledTextures;	// texture objects that own variants
+
+void D3DTextureObject :: InvalidateDerived()
+{
+	m_remixHashState = 0;
+	m_styledFailed = false;
+	if (m_styledVariant[0] || m_styledVariant[1] || m_styledVariant[2])
+		ReleaseStyledVariants();
+}
+
+void D3DTextureObject :: ReleaseStyledVariants()
+{
+	for (int i = 0; i < 3; ++i) {
+		if (m_styledVariant[i]) {
+			m_styledVariant[i]->Release();
+			m_styledVariant[i] = nullptr;
+		}
+	}
+	g_styledTextures.erase( this );
+}
+
+void D3DTex_ReleaseAllStyledVariants()
+{
+	// ReleaseStyledVariants erases from the set
+	while (!g_styledTextures.empty())
+		(*g_styledTextures.begin())->InvalidateDerived();
+}
+
+bool D3DTextureObject :: GetRemixHash( unsigned long long *out_hash )
+{
+	if (!m_remixHashState) {
+		unsigned long long hash = 0;
+		if (D3DTexDump_Hash( this, &hash, nullptr )) {
+			m_remixHash = hash;
+			m_remixHashState = 1;
+		} else
+			m_remixHashState = 2;
+	}
+	if (m_remixHashState != 1)
+		return false;
+	*out_hash = m_remixHash;
+	return true;
+}
+
+// Copy of the texture (same size, format, mip count, pool; every level byte-exact) with the very first byte of mip 0
+// XORed with (level + 1). For 32-bit BGRA that is the B channel of texel 0, and D3DTexDump_Hash hashes the tightly
+// packed rows, so the variant's Remix hash is XXH3_64 of the base mip-0 bytes with that one byte changed.
+LPDIRECT3DTEXTURE9 D3DTextureObject :: GetStyledVariant( int level )
+{
+	if (level < 0 || level > 2 || m_styledFailed || m_target != GL_TEXTURE_2D || !m_pD3DTexture)
+		return nullptr;
+	if (m_styledVariant[level])
+		return m_styledVariant[level];
+
+	D3DSURFACE_DESC desc;
+	if (FAILED( m_pD3DTexture->GetLevelDesc( 0, &desc ) ))
+		return nullptr;
+	if (desc.Format != D3DFMT_A8R8G8B8 && desc.Format != D3DFMT_X8R8G8B8) {
+		static int s_logged = 0;
+		if (s_logged++ < 4)
+			logPrintf( "StyledEmission: texture %u is %s, only 32-bit A8R8G8B8/X8R8G8B8 can be varied\n",
+				m_glIndex, D3DGlobal_FormatToString( desc.Format ) );
+		m_styledFailed = true;
+		return nullptr;
+	}
+	const DWORD levels = m_pD3DTexture->GetLevelCount();
+	LPDIRECT3DTEXTURE9 var = nullptr;
+	if (FAILED( D3DGlobal.pDevice->CreateTexture( desc.Width, desc.Height, levels, 0, desc.Format, D3DPOOL_MANAGED, &var, NULL ) ) || !var) {
+		m_styledFailed = true;
+		return nullptr;
+	}
+	bool ok = true;
+	for (DWORD l = 0; ok && l < levels; ++l) {
+		D3DSURFACE_DESC ld;
+		D3DLOCKED_RECT src, dst;
+		if (FAILED( m_pD3DTexture->GetLevelDesc( l, &ld ) )) { ok = false; break; }
+		if (FAILED( m_pD3DTexture->LockRect( l, &src, NULL, D3DLOCK_READONLY ) )) { ok = false; break; }
+		if (FAILED( var->LockRect( l, &dst, NULL, 0 ) )) {
+			m_pD3DTexture->UnlockRect( l );
+			ok = false;
+			break;
+		}
+		for (UINT y = 0; y < ld.Height; ++y)
+			memcpy( (BYTE*)dst.pBits + (size_t)y * dst.Pitch, (const BYTE*)src.pBits + (size_t)y * src.Pitch, (size_t)ld.Width * 4 );
+		if (l == 0)
+			*(BYTE*)dst.pBits ^= (BYTE)(level + 1); // the styled-emission variant rule
+		var->UnlockRect( l );
+		m_pD3DTexture->UnlockRect( l );
+	}
+	if (!ok) {
+		var->Release();
+		m_styledFailed = true;
+		return nullptr;
+	}
+	var->SetPriority( m_priority );
+	m_styledVariant[level] = var;
+	g_styledTextures.insert( this );
+	return var;
 }

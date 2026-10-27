@@ -53,6 +53,21 @@ void *qdx_rigcam_apply( void *refdef );
 // Whether captured dynamic lights are drawn (QindieGL.ini dlights); light styles are captured regardless.
 void qdx_dlights_set_enabled( int enabled );
 
+// Light style brightness (0..~2, 1 = full) as the map lights use it this frame: the game's lightstyle table when
+// valid, else the timer string for styles 1..11, else 1.
+float qdx_lightstyle_factor( int style );
+
+// Styled emission (<map>.estyles, see D3DIMBuffer::End): lamp faces drawn with a variant of their texture so
+// Remix can scale the emission per lightstyle. Zero overhead while qdx_estyles_active is 0.
+extern int qdx_estyles_active;
+// whether the map lists faces with this Remix texture hash
+int qdx_estyles_has_hash( unsigned long long hash );
+// finds the entry with this hash and a centroid within 2 units per axis; returns its style (1..63) or 0
+int qdx_estyles_match( unsigned long long hash, const float *centroid );
+// bookkeeping for the log: a draw whose texture is listed but matched no face / the first swap of the map
+void qdx_estyles_note_unmatched();
+void qdx_estyles_note_swap( unsigned long long hash, int style, int level );
+
 #ifdef __cplusplus
 } //extern "C"
 #endif

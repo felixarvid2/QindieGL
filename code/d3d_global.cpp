@@ -1038,6 +1038,7 @@ OPENGL_API HGLRC WINAPI wrap_wglCreateContext( HDC hdc )
 	D3DGlobal.settings.game.flashblendLights = D3DGlobal_ReadGameConf( "flashblendlights" );
 	D3DGlobal.settings.game.polyblendOverlay = D3DGlobal_ReadGameConf( "polyblendoverlay" );
 	D3DGlobal.settings.game.untexturedAdditive = D3DGlobal_ReadGameConf( "untexturedadditive" );
+	D3DGlobal.settings.game.styledEmission = D3DGlobal_ReadGameConf( "styledemission" );
 	D3DGlobal.settings.game.depthOffDisablesWrites = D3DGlobal_ReadGameConf( "depthOffDisablesWrites" );
 	D3DGlobal.settings.game.smoothNormals = D3DGlobal_ReadGameConf( "smoothnormals" );
 	D3DGlobal.settings.game.mapLights = D3DGlobal_ReadGameConf( "maplights" );

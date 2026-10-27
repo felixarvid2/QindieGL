@@ -170,6 +170,7 @@ typedef struct D3DGlobal_s
 			DWORD               flashblendLights;
 			DWORD               polyblendOverlay;
 			DWORD               untexturedAdditive;
+			DWORD               styledEmission;
 			DWORD               depthOffDisablesWrites;
 			DWORD               smoothNormals;
 			DWORD               mapLights;
