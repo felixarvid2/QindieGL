@@ -408,7 +408,9 @@ LPDIRECT3DTEXTURE9 D3DIMBuffer :: StyledEmissionTexture( D3DTextureObject **outB
 	}
 	int level = (int)floorf( qdx_lightstyle_factor( style ) * 3.0f + 0.5f );
 	if ( level < 0 ) level = 0;
-	if ( level >= 3 )
+	if ( level > 3 ) level = 3;
+	qdx_estyles_note_level( style, level );
+	if ( level == 3 )
 		return nullptr;
 	LPDIRECT3DTEXTURE9 variant = base->GetStyledVariant( level );
 	if ( !variant )

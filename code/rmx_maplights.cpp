@@ -205,6 +205,8 @@ int qdx_estyles_active = 0;
 static unsigned long g_estyles_unmatched = 0;
 static bool g_estyles_swapped = false;
 static char g_estyles_map[128] = { 0 }; // map the data and counters belong to
+static signed char g_estyles_level[64];    // last drawn level per style, -1 = not drawn yet
+static int g_estyles_level_logs = 0;
 
 static void maplights_estyles_report()
 {
@@ -220,6 +222,8 @@ static void maplights_estyles_clear()
 	qdx_estyles_active = 0;
 	g_estyles_swapped = false;
 	g_estyles_map[0] = 0;
+	memset( g_estyles_level, -1, sizeof( g_estyles_level ) );
+	g_estyles_level_logs = 0;
 	D3DTex_ReleaseAllStyledVariants();
 }
 
@@ -307,6 +311,18 @@ void qdx_estyles_note_swap( unsigned long long hash, int style, int level )
 	if ( g_estyles_swapped ) return;
 	g_estyles_swapped = true;
 	logPrintf( "StyledEmission: first swap on '%s': texture 0x%016llX style %d level %d\n", g_estyles_map, hash, style, level );
+}
+
+void qdx_estyles_note_level( int style, int level )
+{
+	if ( style < 0 || style >= 64 || g_estyles_level[style] == level ) return;
+	if ( g_estyles_level_logs < 16 )
+	{
+		++g_estyles_level_logs;
+		logPrintf( "StyledEmission: '%s' style %d level %d -> %d%s\n", g_estyles_map, style, g_estyles_level[style], level,
+			g_estyles_level_logs == 16 ? " (further changes on this map not logged)" : "" );
+	}
+	g_estyles_level[style] = (signed char)level;
 }
 
 // Test rig: rtx-remix/rigdlight.txt "X Y Z R G B INTENSITY" per line adds dynamic lights as if the game sent
