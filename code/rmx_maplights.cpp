@@ -12,6 +12,7 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "d3d_wrapper.hpp"
 #include "d3d_global.hpp"
@@ -198,9 +199,18 @@ float qdx_lightstyle_factor( int style )
 	return 1.0f;
 }
 
-// Styled emission data: <map>.estyles, one face per line "0xHASH x y z style" (see maplights_estyles_load)
-struct estyle_t { float pos[3]; int style; };
-static std::unordered_map<unsigned long long, std::vector<estyle_t> > g_estyles;
+// Styled emission data: <map>.estyles, one face per line "0xHASH x y z style" (see maplights_estyles_load).
+// Faces are bucketed by texture hash and 8-unit cell of their centroid, so a texture listed on thousands of faces
+// (style 0 entries) still costs a few lookups per draw.
+struct estyle_t { unsigned long long hash; float pos[3]; int style; };
+static const float ESTYLES_CELL = 8.0f, ESTYLES_TOL = 2.0f;
+static std::unordered_map<unsigned long long, std::vector<estyle_t> > g_estyles;   // bucket key -> faces
+static std::unordered_set<unsigned long long> g_estyles_hashes;
+static unsigned long long estyles_key( unsigned long long hash, int cx, int cy, int cz )
+{
+	return hash ^ ( (unsigned long long)(unsigned)cx * 0x9E3779B97F4A7C15ull ) ^ ( (unsigned long long)(unsigned)cy * 0xC2B2AE3D27D4EB4Full ) ^
+		( (unsigned long long)(unsigned)cz * 0x165667B19E3779F9ull );
+}
 int qdx_estyles_active = 0;
 static unsigned long g_estyles_unmatched = 0;
 static bool g_estyles_swapped = false;
@@ -219,6 +229,7 @@ static void maplights_estyles_clear()
 {
 	maplights_estyles_report();
 	g_estyles.clear();
+	g_estyles_hashes.clear();
 	qdx_estyles_active = 0;
 	g_estyles_swapped = false;
 	g_estyles_map[0] = 0;
@@ -228,7 +239,9 @@ static void maplights_estyles_clear()
 }
 
 // lines: "0xHASH x y z style" (# comments, blank lines ignored); HASH hex Remix hash (0x optional), x y z the face
-// centroid in world units, style 1..63. Malformed lines are skipped and counted.
+// centroid in world units (model coordinates for brush entities), style 1..63, or 0 for a face that is not a light
+// in this map although its texture is emissive (drawn with the emission-off variant). Malformed lines are skipped and
+// counted.
 static void maplights_estyles_load( const std::string &dir )
 {
 	maplights_estyles_clear();
@@ -252,7 +265,7 @@ static void maplights_estyles_load( const std::string &dir )
 		char *end;
 		bool ok = nt == 5;
 		unsigned long long hash = 0;
-		estyle_t e = { { 0, 0, 0 }, 0 };
+		estyle_t e = { 0, { 0, 0, 0 }, 0 };
 		if ( ok )
 		{
 			hash = _strtoui64( tok[0], &end, 16 );
@@ -266,41 +279,57 @@ static void maplights_estyles_load( const std::string &dir )
 		if ( ok )
 		{
 			long st = strtol( tok[4], &end, 10 );
-			ok = *end == 0 && st >= 1 && st <= 63;
+			ok = *end == 0 && st >= 0 && st <= 63;
 			e.style = (int)st;
 		}
 		if ( !ok ) { bad++; continue; }
-		g_estyles[hash].push_back( e );
+		e.hash = hash;
+		g_estyles[estyles_key( hash, (int)floorf( e.pos[0] / ESTYLES_CELL ), (int)floorf( e.pos[1] / ESTYLES_CELL ),
+			(int)floorf( e.pos[2] / ESTYLES_CELL ) )].push_back( e );
+		g_estyles_hashes.insert( hash );
 		faces++;
 	}
 	fclose( f );
 	if ( bad )
 		logPrintf( "StyledEmission: skipped %d malformed lines in '%s'\n", bad, file.c_str() );
-	logPrintf( "StyledEmission: %s %d faces, %u textures\n", g_mapname, faces, (unsigned)g_estyles.size() );
+	logPrintf( "StyledEmission: %s %d faces, %u textures\n", g_mapname, faces, (unsigned)g_estyles_hashes.size() );
 	qdx_estyles_active = faces > 0;
 }
 
 int qdx_estyles_has_hash( unsigned long long hash )
 {
-	return g_estyles.find( hash ) != g_estyles.end();
+	return g_estyles_hashes.find( hash ) != g_estyles_hashes.end();
 }
 
 int qdx_estyles_match( unsigned long long hash, const float *c )
 {
-	auto it = g_estyles.find( hash );
-	if ( it == g_estyles.end() ) return 0;
-	int best = 0;
-	float bestd = 1e30f;
-	for ( size_t i = 0; i < it->second.size(); i++ )
+	// the cells within ESTYLES_TOL of the centroid: at most two per axis
+	int lo[3], hi[3];
+	for ( int k = 0; k < 3; k++ )
 	{
-		const estyle_t &e = it->second[i];
-		float dx = fabsf( e.pos[0] - c[0] ), dy = fabsf( e.pos[1] - c[1] ), dz = fabsf( e.pos[2] - c[2] );
-		if ( dx <= 2.0f && dy <= 2.0f && dz <= 2.0f && dx + dy + dz < bestd )
-		{
-			bestd = dx + dy + dz;
-			best = e.style;
-		}
+		lo[k] = (int)floorf( ( c[k] - ESTYLES_TOL ) / ESTYLES_CELL );
+		hi[k] = (int)floorf( ( c[k] + ESTYLES_TOL ) / ESTYLES_CELL );
 	}
+	int best = -1;
+	float bestd = 1e30f;
+	for ( int x = lo[0]; x <= hi[0]; x++ )
+		for ( int y = lo[1]; y <= hi[1]; y++ )
+			for ( int z = lo[2]; z <= hi[2]; z++ )
+			{
+				auto it = g_estyles.find( estyles_key( hash, x, y, z ) );
+				if ( it == g_estyles.end() ) continue;
+				for ( size_t i = 0; i < it->second.size(); i++ )
+				{
+					const estyle_t &e = it->second[i];
+					if ( e.hash != hash ) continue;
+					float dx = fabsf( e.pos[0] - c[0] ), dy = fabsf( e.pos[1] - c[1] ), dz = fabsf( e.pos[2] - c[2] );
+					if ( dx <= ESTYLES_TOL && dy <= ESTYLES_TOL && dz <= ESTYLES_TOL && dx + dy + dz < bestd )
+					{
+						bestd = dx + dy + dz;
+						best = e.style;
+					}
+				}
+			}
 	return best;
 }
 

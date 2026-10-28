@@ -58,11 +58,13 @@ void qdx_dlights_set_enabled( int enabled );
 float qdx_lightstyle_factor( int style );
 
 // Styled emission (<map>.estyles, see D3DIMBuffer::End): lamp faces drawn with a variant of their texture so
-// Remix can scale the emission per lightstyle. Zero overhead while qdx_estyles_active is 0.
+// Remix can scale the emission per lightstyle, and faces that use a light texture without being lights drawn with
+// the emission-off variant. Zero overhead while qdx_estyles_active is 0.
 extern int qdx_estyles_active;
 // whether the map lists faces with this Remix texture hash
 int qdx_estyles_has_hash( unsigned long long hash );
-// finds the entry with this hash and a centroid within 2 units per axis; returns its style (1..63) or 0
+// finds the entry with this hash and a centroid within 2 units per axis; returns its style (1..63, 0 = not a light
+// here: emission off) or -1 when none matches
 int qdx_estyles_match( unsigned long long hash, const float *centroid );
 // bookkeeping for the log: a draw whose texture is listed but matched no face / the first swap of the map
 void qdx_estyles_note_unmatched();
