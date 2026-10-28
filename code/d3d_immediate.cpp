@@ -378,6 +378,7 @@ LPDIRECT3DTEXTURE9 D3DIMBuffer :: SolidTexture( DWORD rgb )
 #ifndef QINDIEGLSRC_NO_REMIX
 // The variant texture to draw this polygon with, or null. Only for world faces listed in <map>.estyles: a GL_POLYGON /
 // trifan with a 2D texture on stage 0 whose Remix hash is listed and whose centroid is within 2 units of an entry.
+// Style 0 entries (faces that use a light texture without being lights) always get the emission-off variant.
 LPDIRECT3DTEXTURE9 D3DIMBuffer :: StyledEmissionTexture( D3DTextureObject **outBase )
 {
 	if ( !D3DGlobal.settings.game.styledEmission || !remixOnline )
@@ -401,15 +402,19 @@ LPDIRECT3DTEXTURE9 D3DIMBuffer :: StyledEmissionTexture( D3DTextureObject **outB
 	for ( int k = 0; k < 3; ++k )
 		c[k] /= (float)m_vertexCount;
 	const int style = qdx_estyles_match( hash, c );
-	if ( !style )
+	if ( style < 0 )
 	{
 		qdx_estyles_note_unmatched();
 		return nullptr;
 	}
-	int level = (int)floorf( qdx_lightstyle_factor( style ) * 3.0f + 0.5f );
-	if ( level < 0 ) level = 0;
-	if ( level > 3 ) level = 3;
-	qdx_estyles_note_level( style, level );
+	int level = 0;   // style 0: the texture is a light elsewhere but not on this face
+	if ( style > 0 )
+	{
+		level = (int)floorf( qdx_lightstyle_factor( style ) * 3.0f + 0.5f );
+		if ( level < 0 ) level = 0;
+		if ( level > 3 ) level = 3;
+		qdx_estyles_note_level( style, level );
+	}
 	if ( level == 3 )
 		return nullptr;
 	LPDIRECT3DTEXTURE9 variant = base->GetStyledVariant( level );
