@@ -511,6 +511,32 @@ bool D3DIMBuffer :: CameraInsideModel( GLenum mode )
 }
 #endif
 
+// debug (TraceBlendDraws = N in [Settings]): log the first N distinct blended draws, keyed by texture, blend function,
+// primitive and path (immediate mode or vertex arrays), with vertex count, vertex colour alpha range (immediate mode
+// only, else -1), alpha test and depth write. Shows how particles and other translucent draws reach Remix.
+void D3DTraceBlendDraw( const char *path, GLenum mode, int count, int amin, int amax )
+{
+	if ( !D3DGlobal.settings.traceBlendDraws || !D3DState.EnableState.alphaBlendEnabled )
+		return;
+	unsigned long long hash = 0;
+	D3DTextureObject *tex = D3DState.EnableState.textureEnabled[0] ? D3DState.TextureState.currentTexture[0][D3D_TEXTARGET_2D] : nullptr;
+	if ( !tex || !tex->GetRemixHash( &hash ) )
+		hash = 0;
+	const unsigned long long key = hash ^ ( (unsigned long long)D3DState.ColorBufferState.glBlendSrc << 40 ) ^
+		( (unsigned long long)D3DState.ColorBufferState.glBlendDst << 20 ) ^ (unsigned long long)mode ^
+		( (unsigned long long)path[0] << 56 ) ^ ( D3DGlobal_IsOrthoProjection() ? 0x8000000000000000ull : 0 );
+	static std::vector<unsigned long long> s_seen;
+	if ( s_seen.size() >= D3DGlobal.settings.traceBlendDraws ||
+		std::find( s_seen.begin(), s_seen.end(), key ) != s_seen.end() )
+		return;
+	s_seen.push_back( key );
+	logPrintf( "TraceBlendDraws: %s texture 0x%016llX blend 0x%04X 0x%04X prim %d verts %d alpha %d..%d alphatest %d"
+		" depthwrite %d ortho %d\n", path, hash, (unsigned)D3DState.ColorBufferState.glBlendSrc,
+		(unsigned)D3DState.ColorBufferState.glBlendDst, (int)mode, count, amin, amax,
+		(int)D3DState.EnableState.alphaTestEnabled, (int)D3DState.DepthBufferState.depthWriteMask,
+		D3DGlobal_IsOrthoProjection() ? 1 : 0 );
+}
+
 void D3DIMBuffer :: End( )
 {
 	if ( !m_vertexCount || !m_bBegan ) 
@@ -549,6 +575,17 @@ void D3DIMBuffer :: End( )
 		return;
 	}
 #endif
+
+	if ( D3DGlobal.settings.traceBlendDraws )
+	{
+		int amin = 255, amax = 0;
+		for ( int i = 0; i < m_vertexCount; ++i )
+		{
+			amin = std::min( amin, (int)( m_pBuffer[i].color >> 24 ) );
+			amax = std::max( amax, (int)( m_pBuffer[i].color >> 24 ) );
+		}
+		D3DTraceBlendDraw( "immediate", m_primitiveType, m_vertexCount, amin, amax );
+	}
 
 	if ( m_primitiveType == GL_LINE_LOOP ) {
 		//close line

@@ -74,4 +74,6 @@ private:
 	bool		m_solidUV;	// this draw gets a solid texture: one constant texcoord set is added to its vertices
 };
 
+void D3DTraceBlendDraw( const char *path, GLenum mode, int count, int amin, int amax );
+
 #endif //QINDIEGL_D3D_IMMEDIATE_H

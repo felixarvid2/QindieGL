@@ -1620,6 +1620,7 @@ static void internal_DrawArrays( GLenum mode, GLint first, GLsizei count )
 		}
 		//use vertex array mode
 		assert( D3DGlobal.pVABuffer != nullptr );
+		D3DTraceBlendDraw( "arrays", mode, count, -1, -1 );
 		D3DGlobal.pVABuffer->SetIndices<GLushort>( mode, first, first + count - 1, count, nullptr );
 		D3DGlobal.pVABuffer->DrawPrimitive();
 		D3DGlobal.pVABuffer->Unlock();
@@ -1705,6 +1706,7 @@ static void internal_DrawElements( GLenum mode, GLuint start, GLuint end, GLsize
 		}
 		//use vertex array mode
 		assert( D3DGlobal.pVABuffer != nullptr );
+		D3DTraceBlendDraw( "elements", mode, count, -1, -1 );
 		
 		switch (type) {
 		case GL_UNSIGNED_BYTE:

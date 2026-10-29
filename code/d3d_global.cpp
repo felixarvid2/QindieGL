@@ -1024,6 +1024,7 @@ OPENGL_API HGLRC WINAPI wrap_wglCreateContext( HDC hdc )
 	D3DGlobal.settings.multisample = D3DGlobal_GetRegistryValue( "MultiSample", "Settings", 0 );
 	D3DGlobal.settings.projectionFix = D3DGlobal_GetRegistryValue( "ProjectionFix", "Settings", 0 );
 	D3DGlobal.settings.dumpTextures = D3DGlobal_GetRegistryValue( "DumpTextures", "Settings", 0 );
+	D3DGlobal.settings.traceBlendDraws = D3DGlobal_GetRegistryValue( "TraceBlendDraws", "Settings", 0 );
 	D3DTexDump_Init();
 	D3DGlobal.settings.projectionMaxZFar = D3DGlobal_GetRegistryValue( "ProjectionMaxZFar", "Settings", 0 );
 	D3DGlobal.settings.borderlessFullscreen = D3DGlobal_GetRegistryValue( "BorderlessFullscreen", "Settings", 0 );

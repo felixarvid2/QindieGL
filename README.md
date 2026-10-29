@@ -21,6 +21,8 @@ in the status table.
 >   and live reload while playing
 > - `dlights`: the game's dynamic lights (muzzle flashes, explosions) as Remix lights (Anachronox)
 > - `DumpTextures`: Remix texture hashes and TGA dumps, to make replacements without a capture
+> - `TraceBlendDraws`: logs the distinct blended draws (texture hash, blend function, path, alpha), to see how
+>   particles and other translucent draws reach Remix
 > - `proctex`: freezes procedural textures (Anachronox lava) to a stable hash so Remix can replace them
 > - works with the [Remix Plus](https://github.com/RemixProjGroup/dxvk-remix) runtime as well as stock RTX Remix
 >
