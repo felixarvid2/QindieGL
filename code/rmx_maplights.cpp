@@ -348,8 +348,8 @@ void qdx_estyles_note_level( int style, int level )
 	if ( g_estyles_level_logs < 16 )
 	{
 		++g_estyles_level_logs;
-		logPrintf( "StyledEmission: '%s' style %d level %d -> %d%s\n", g_estyles_map, style, g_estyles_level[style], level,
-			g_estyles_level_logs == 16 ? " (further changes on this map not logged)" : "" );
+		logPrintf( "StyledEmission: '%s' style %d level %d -> %d (factor %.3f)%s\n", g_estyles_map, style, g_estyles_level[style],
+			level, qdx_lightstyle_factor( style ), g_estyles_level_logs == 16 ? " (further changes on this map not logged)" : "" );
 	}
 	g_estyles_level[style] = (signed char)level;
 }
