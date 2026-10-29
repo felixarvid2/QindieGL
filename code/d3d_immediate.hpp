@@ -47,6 +47,7 @@ protected:
 	bool TryPolyBlendOverlay();
 #ifndef QINDIEGLSRC_NO_REMIX
 	LPDIRECT3DTEXTURE9 StyledEmissionTexture( D3DTextureObject **outBase );
+	bool DrawAdditive() const;
 	bool CameraInsideModel( GLenum mode );
 #endif
 	bool WantsSolidTexture() const;
@@ -75,5 +76,6 @@ private:
 };
 
 void D3DTraceBlendDraw( const char *path, GLenum mode, int count, int amin, int amax );
+void D3DIMBuffer_SetAdditiveTextures( const char *list );
 
 #endif //QINDIEGL_D3D_IMMEDIATE_H
