@@ -537,6 +537,47 @@ void D3DTraceBlendDraw( const char *path, GLenum mode, int count, int amin, int 
 		D3DGlobal_IsOrthoProjection() ? 1 : 0 );
 }
 
+#ifndef QINDIEGLSRC_NO_REMIX
+// additive_textures (anox_customise.ini, [maplights.global] / [maplights.<map>], read on map load): Remix hashes
+// of textures whose alpha-blended (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) perspective draws are drawn additively
+// (SRC_ALPHA, ONE) instead. Remix's emissive blend override only reaches additive draws; the original draws these
+// particles unlit, so under path tracing the dim surroundings leave them nearly invisible (Anachronox's sunstrip
+// steam: burst_04, magical_08).
+static std::vector<unsigned long long> s_additiveTextures;
+
+void D3DIMBuffer_SetAdditiveTextures( const char *list )
+{
+	s_additiveTextures.clear();
+	for ( const char *p = list; p && *p; )
+	{
+		char *end;
+		const unsigned long long h = _strtoui64( p, &end, 16 );
+		if ( end == p )
+		{
+			++p;
+			continue;
+		}
+		s_additiveTextures.push_back( h );
+		p = end;
+	}
+	if ( !s_additiveTextures.empty() )
+		logPrintf( "AdditiveTextures: %d texture(s) drawn additively\n", (int)s_additiveTextures.size() );
+}
+
+bool D3DIMBuffer :: DrawAdditive() const
+{
+	if ( s_additiveTextures.empty() || !remixOnline || !D3DState.EnableState.alphaBlendEnabled ||
+		D3DState.ColorBufferState.glBlendSrc != GL_SRC_ALPHA ||
+		D3DState.ColorBufferState.glBlendDst != GL_ONE_MINUS_SRC_ALPHA || D3DGlobal_IsOrthoProjection() )
+		return false;
+	D3DTextureObject *tex = D3DState.EnableState.textureEnabled[0] ? D3DState.TextureState.currentTexture[0][D3D_TEXTARGET_2D] : nullptr;
+	unsigned long long hash;
+	if ( !tex || !tex->GetRemixHash( &hash ) )
+		return false;
+	return std::find( s_additiveTextures.begin(), s_additiveTextures.end(), hash ) != s_additiveTextures.end();
+}
+#endif
+
 void D3DIMBuffer :: End( )
 {
 	if ( !m_vertexCount || !m_bBegan ) 
@@ -726,6 +767,12 @@ void D3DIMBuffer :: End( )
 		styledTex = StyledEmissionTexture( &styledBase );
 #endif
 
+#ifndef QINDIEGLSRC_NO_REMIX
+	const bool additive = DrawAdditive();
+	if ( additive )
+		D3DGlobal.pDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_ONE );
+#endif
+
 	//reorder buffer, so it will contain a properly aligned data according to FVF
 	if ( ReorderBufferToFVF( iFVF, sizeFVF ) )
 	{
@@ -786,6 +833,11 @@ void D3DIMBuffer :: End( )
 			break;
 		}
 	}
+
+#ifndef QINDIEGLSRC_NO_REMIX
+	if ( additive )
+		D3DGlobal.pDevice->SetRenderState( D3DRS_DESTBLEND, D3DState.ColorBufferState.alphaBlendDstFunc );
+#endif
 
 #ifndef QINDIEGLSRC_NO_REMIX
 	if ( styledTex )

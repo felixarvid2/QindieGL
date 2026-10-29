@@ -17,6 +17,7 @@
 #include "d3d_wrapper.hpp"
 #include "d3d_global.hpp"
 #include "d3d_texture.hpp"
+#include "d3d_immediate.hpp"
 
 #define MAPLIGHTS_MAX 4096
 #define MAPLIGHTS_APPLY_DELAY_FRAMES 120
@@ -1210,6 +1211,11 @@ void qdx_maplights_draw()
 			g_prm = maplights_read_params();
 			g_event_lights = qdx_readmapconfflt( "maplights", "event_lights", 1.0f ) != 0.0f;
 			maplights_estyles_load( maplights_game_dir() );
+			{
+				char additive[1024] = "";
+				qdx_readmapconfstr( "maplights", "additive_textures", additive, sizeof( additive ) );
+				D3DIMBuffer_SetAdditiveTextures( additive );
+			}
 			g_mf_scale = qdx_readmapconfflt( "maplights", "model_fill", 0.0f );
 			g_mf_radius = qdx_readmapconfflt( "maplights", "model_fill_radius", 6.0f );
 			g_mf_distance = qdx_readmapconfflt( "maplights", "model_fill_distance", 40.0f );
